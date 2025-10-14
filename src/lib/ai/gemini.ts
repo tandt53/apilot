@@ -1,0 +1,218 @@
+/**
+ * Google Gemini AI Service Implementation
+ */
+
+import {GoogleGenerativeAI} from '@google/generative-ai'
+import type {TestCase} from '@/types/database'
+import {AIService, type GenerateTestsOptions, type GenerateTestsResult, type TestConnectionResult} from './base'
+import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
+
+export interface GeminiConfig {
+  apiKey: string
+  model?: string
+  temperature?: number
+  maxTokens?: number
+}
+
+export class GeminiService extends AIService {
+  readonly provider = 'gemini' as const
+  private client: GoogleGenerativeAI
+  private model: string
+  private temperature: number
+  private maxTokens: number
+
+  constructor(config: GeminiConfig) {
+    super()
+    this.client = new GoogleGenerativeAI(config.apiKey)
+    this.model = config.model || 'gemini-2.0-flash-exp'
+    this.temperature = config.temperature ?? 0.7
+    this.maxTokens = config.maxTokens || 8192
+  }
+
+  /**
+   * Test connection to Gemini
+   */
+  async testConnection(): Promise<TestConnectionResult> {
+    const startTime = Date.now()
+
+    try {
+      const model = this.client.getGenerativeModel({ model: this.model })
+      const result = await model.generateContent(TEST_CONNECTION_PROMPT)
+      const latency = Date.now() - startTime
+
+      const response = result.response
+      const text = response.text()
+
+      if (text) {
+        return {
+          success: true,
+          message: text,
+          latency,
+        }
+      }
+
+      return {
+        success: false,
+        message: 'No response from Gemini',
+        error: 'Empty response',
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        message: 'Failed to connect to Gemini',
+        error: error.message || String(error),
+      }
+    }
+  }
+
+  /**
+   * Generate test cases from endpoints
+   */
+  async generateTests(options: GenerateTestsOptions): Promise<GenerateTestsResult> {
+    const { endpoints, spec, onProgress, onTestGenerated, signal } = options
+
+    if (endpoints.length === 0) {
+      return {
+        tests: [],
+        completed: true,
+        completedEndpointIds: [],
+        remainingEndpointIds: [],
+        conversationMessages: [],
+        generatedTestsSummary: ''
+      }
+    }
+
+    console.log('[Gemini Service] Starting test generation for', endpoints.length, 'endpoints')
+
+    // Format prompt
+    const prompt = TEST_GENERATION_PROMPT.replace(
+      '{endpoints_json}',
+      formatEndpointsForPrompt(endpoints)
+    ).replace('{spec_json}', formatSpecForPrompt(spec))
+
+    try {
+      const model = this.client.getGenerativeModel({
+        model: this.model,
+        generationConfig: {
+          temperature: this.temperature,
+          maxOutputTokens: this.maxTokens,
+        },
+      })
+
+      // Use streaming for better UX
+      const result = await model.generateContentStream(prompt)
+
+      let fullResponse = ''
+      const tests: Partial<TestCase>[] = []
+      let lastJsonBlockCount = 0
+
+      for await (const chunk of result.stream) {
+        // Check for cancellation
+        if (signal?.aborted) {
+          console.log('[Gemini Service] Generation aborted by user')
+          throw new Error('ABORTED')
+        }
+
+        const chunkText = chunk.text()
+        fullResponse += chunkText
+
+        // Try to extract JSON blocks as they arrive
+        const jsonBlocks = this.extractJsonBlocks(fullResponse)
+
+        // If we have new blocks, process them
+        if (jsonBlocks.length > lastJsonBlockCount) {
+          for (let i = lastJsonBlockCount; i < jsonBlocks.length; i++) {
+            const block = jsonBlocks[i]
+
+            console.log('[Gemini Service] Processing block:', { method: block.method, path: block.path })
+
+            // Find matching endpoint
+            const endpoint = endpoints.find(
+              e =>
+                e.method === block.method &&
+                e.path === block.path
+            )
+
+            if (endpoint && endpoint.id) {
+              console.log('[Gemini Service] Found matching endpoint:', endpoint.id)
+
+              const test = this.mapResponseToTestCase(
+                block,
+                endpoint.specId,
+                endpoint.id
+              )
+              tests.push(test)
+
+              // Report progress
+              if (onProgress) {
+                onProgress({
+                  current: tests.length,
+                  total: endpoints.length * 2, // Estimate 2 tests per endpoint
+                  test,
+                })
+              }
+
+              // Save test in real-time
+              if (onTestGenerated) {
+                console.log('[Gemini Service] Saving test to database...')
+                await onTestGenerated(test)
+              }
+            } else {
+              console.warn('[Gemini Service] No matching endpoint found for:', { method: block.method, path: block.path })
+            }
+          }
+
+          lastJsonBlockCount = jsonBlocks.length
+        }
+      }
+
+      console.log('[Gemini Service] Full response preview:', fullResponse.substring(0, 500))
+
+      // Final extraction to catch any remaining blocks
+      const finalBlocks = this.extractJsonBlocks(fullResponse)
+      console.log('[Gemini Service] Final extraction found', finalBlocks.length, 'total blocks')
+
+      for (let i = lastJsonBlockCount; i < finalBlocks.length; i++) {
+        const block = finalBlocks[i]
+        const endpoint = endpoints.find(
+          e =>
+            e.method === block.method &&
+            e.path === block.path
+        )
+
+        if (endpoint && endpoint.id) {
+          const test = this.mapResponseToTestCase(block, endpoint.specId, endpoint.id)
+          tests.push(test)
+
+          if (onProgress) {
+            onProgress({
+              current: tests.length,
+              total: endpoints.length * 2,
+              test,
+            })
+          }
+
+          if (onTestGenerated) {
+            await onTestGenerated(test)
+          }
+        }
+      }
+
+      console.log('[Gemini Service] Generation completed. Total tests:', tests.length)
+
+      const completedEndpointIds = endpoints.map(e => e.id).filter((id): id is number => id !== undefined)
+
+      return {
+        tests,
+        completed: true,
+        completedEndpointIds,
+        remainingEndpointIds: [],
+        conversationMessages: [{ role: 'user', content: '' }],
+        generatedTestsSummary: `Generated ${tests.length} test(s) for ${endpoints.length} endpoint(s)`
+      }
+    } catch (error: any) {
+      console.error('[Gemini Service] Generation error:', error)
+      throw new Error(`Failed to generate tests: ${error.message || String(error)}`)
+    }
+  }
+}
