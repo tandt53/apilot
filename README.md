@@ -128,14 +128,6 @@ Tests are generated based on:
 - Common API testing patterns (positive & negative cases)
 - Workflow analysis for multi-step scenarios
 
-## 📚 Documentation
-
-- [CLAUDE.md](./CLAUDE.md) - Developer guide for working with Claude Code
-- [Architecture](./docs/ARCHITECTURE.md) - System design and technical architecture
-- [Features](./docs/FEATURES.md) - Detailed feature documentation
-- [Design Decisions](./docs/DESIGN_DECISIONS.md) - Problems and solutions
-- [User Guide](./docs/USER_GUIDE.md) - How to use the application
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
@@ -143,10 +135,6 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 ## 📄 License
 
 MIT License - see [LICENSE](./LICENSE) file for details
-
-## 🌐 Website
-
-[https://apilot.app](https://apilot.app)
 
 ## 💬 Support
 
