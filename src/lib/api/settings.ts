@@ -25,7 +25,7 @@ export async function getSettings(): Promise<Settings> {
           apiKey: '', // Empty by default - user must configure
           model: 'gpt-4o-mini',
           temperature: 0.7,
-          maxTokens: 4096,
+          maxTokens: 16000,
         },
       },
       defaultTimeout: 30000,

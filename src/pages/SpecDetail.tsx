@@ -183,6 +183,13 @@ export default function SpecDetail() {
         },
         onTestGenerated: async (test) => {
           // Save test in real-time as it's generated
+          console.log('[SpecDetail] Received test from IPC:', {
+            name: test.name,
+            method: test.method,
+            path: test.path,
+            testType: test.testType,
+            assertions: test.assertions?.length
+          })
           await api.createTestCase(test as any)
         }
       })

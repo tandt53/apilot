@@ -16,12 +16,19 @@ export default function Settings() {
   // Form states
   const [openaiKey, setOpenaiKey] = useState('')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini')
+  const [openaiTemperature, setOpenaiTemperature] = useState(0.3)
+  const [openaiMaxTokens, setOpenaiMaxTokens] = useState(16000)
   const [anthropicKey, setAnthropicKey] = useState('')
   const [anthropicModel, setAnthropicModel] = useState('claude-3-5-sonnet-20241022')
+  const [anthropicTemperature, setAnthropicTemperature] = useState(0.7)
+  const [anthropicMaxTokens, setAnthropicMaxTokens] = useState(4096)
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash-exp')
+  const [geminiTemperature, setGeminiTemperature] = useState(0.7)
+  const [geminiMaxTokens, setGeminiMaxTokens] = useState(8192)
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
   const [ollamaModel, setOllamaModel] = useState('llama3.1:8b')
+  const [ollamaTemperature, setOllamaTemperature] = useState(0.7)
 
   // Load settings from database when component mounts
   useEffect(() => {
@@ -41,6 +48,8 @@ export default function Settings() {
       // Load provider-specific settings
       if (settings.aiSettings.openai) {
         setOpenaiModel(settings.aiSettings.openai.model)
+        setOpenaiTemperature(settings.aiSettings.openai.temperature ?? 0.3)
+        setOpenaiMaxTokens(settings.aiSettings.openai.maxTokens ?? 16000)
         // Show masked API key if it exists
         if (settings.aiSettings.openai.apiKey) {
           setOpenaiKey('••••••••••••••••')
@@ -49,6 +58,8 @@ export default function Settings() {
 
       if (settings.aiSettings.anthropic) {
         setAnthropicModel(settings.aiSettings.anthropic.model)
+        setAnthropicTemperature(settings.aiSettings.anthropic.temperature ?? 0.7)
+        setAnthropicMaxTokens(settings.aiSettings.anthropic.maxTokens ?? 4096)
         if (settings.aiSettings.anthropic.apiKey) {
           setAnthropicKey('••••••••••••••••')
         }
@@ -56,6 +67,8 @@ export default function Settings() {
 
       if (settings.aiSettings.gemini) {
         setGeminiModel(settings.aiSettings.gemini.model)
+        setGeminiTemperature(settings.aiSettings.gemini.temperature ?? 0.7)
+        setGeminiMaxTokens(settings.aiSettings.gemini.maxTokens ?? 8192)
         if (settings.aiSettings.gemini.apiKey) {
           setGeminiKey('••••••••••••••••')
         }
@@ -64,6 +77,7 @@ export default function Settings() {
       if (settings.aiSettings.ollama) {
         setOllamaUrl(settings.aiSettings.ollama.baseUrl)
         setOllamaModel(settings.aiSettings.ollama.model)
+        setOllamaTemperature(settings.aiSettings.ollama.temperature ?? 0.7)
       }
     }
   }, [settings])
@@ -74,33 +88,55 @@ export default function Settings() {
 
     try {
       let config: any = {}
+      const maskedValue = '••••••••••••••••'
 
       switch (selectedProvider) {
         case 'openai': {
-          // Use form key if provided, otherwise load from database
+          // Use form key if provided and not masked, otherwise load from database
           let apiKey = openaiKey
-          if (!apiKey) {
+          if (!apiKey || apiKey === maskedValue) {
             const { getDecryptedAPIKey } = await import('@/lib/api/settings')
             apiKey = await getDecryptedAPIKey('openai') || ''
           }
+
+          if (!apiKey || apiKey === maskedValue) {
+            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTesting(false)
+            return
+          }
+
           config = { apiKey, model: openaiModel }
           break
         }
         case 'anthropic': {
           let apiKey = anthropicKey
-          if (!apiKey) {
+          if (!apiKey || apiKey === maskedValue) {
             const { getDecryptedAPIKey } = await import('@/lib/api/settings')
             apiKey = await getDecryptedAPIKey('anthropic') || ''
           }
+
+          if (!apiKey || apiKey === maskedValue) {
+            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTesting(false)
+            return
+          }
+
           config = { apiKey, model: anthropicModel }
           break
         }
         case 'gemini': {
           let apiKey = geminiKey
-          if (!apiKey) {
+          if (!apiKey || apiKey === maskedValue) {
             const { getDecryptedAPIKey } = await import('@/lib/api/settings')
             apiKey = await getDecryptedAPIKey('gemini') || ''
           }
+
+          if (!apiKey || apiKey === maskedValue) {
+            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTesting(false)
+            return
+          }
+
           config = { apiKey, model: geminiModel }
           break
         }
@@ -129,14 +165,16 @@ export default function Settings() {
         aiSettings.openai = {
           apiKey: await encryptData(openaiKey),
           model: openaiModel,
-          temperature: 0.7,
-          maxTokens: 4096
+          temperature: openaiTemperature,
+          maxTokens: openaiMaxTokens
         }
       } else if (settings?.aiSettings.openai) {
         // Keep existing settings if key wasn't changed
         aiSettings.openai = {
           ...settings.aiSettings.openai,
-          model: openaiModel
+          model: openaiModel,
+          temperature: openaiTemperature,
+          maxTokens: openaiMaxTokens
         }
       }
 
@@ -146,14 +184,16 @@ export default function Settings() {
         aiSettings.anthropic = {
           apiKey: await encryptData(anthropicKey),
           model: anthropicModel,
-          temperature: 0.7,
-          maxTokens: 4096
+          temperature: anthropicTemperature,
+          maxTokens: anthropicMaxTokens
         }
       } else if (settings?.aiSettings.anthropic) {
         // Keep existing settings if key wasn't changed
         aiSettings.anthropic = {
           ...settings.aiSettings.anthropic,
-          model: anthropicModel
+          model: anthropicModel,
+          temperature: anthropicTemperature,
+          maxTokens: anthropicMaxTokens
         }
       }
 
@@ -163,21 +203,23 @@ export default function Settings() {
         aiSettings.gemini = {
           apiKey: await encryptData(geminiKey),
           model: geminiModel,
-          temperature: 0.7,
-          maxTokens: 8192
+          temperature: geminiTemperature,
+          maxTokens: geminiMaxTokens
         }
       } else if (settings?.aiSettings.gemini) {
         // Keep existing settings if key wasn't changed
         aiSettings.gemini = {
           ...settings.aiSettings.gemini,
-          model: geminiModel
+          model: geminiModel,
+          temperature: geminiTemperature,
+          maxTokens: geminiMaxTokens
         }
       }
 
       aiSettings.ollama = {
         baseUrl: ollamaUrl,
         model: ollamaModel,
-        temperature: 0.7
+        temperature: ollamaTemperature
       }
 
       await updateSettings.mutateAsync({
@@ -283,6 +325,32 @@ export default function Settings() {
               />
               <p className="text-xs text-gray-500 mt-1">Examples: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
+              <input
+                type="number"
+                value={openaiTemperature}
+                onChange={(e) => setOpenaiTemperature(parseFloat(e.target.value))}
+                min="0"
+                max="2"
+                step="0.1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Controls randomness (0.0 = deterministic, 2.0 = very creative). Default: 0.3</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                value={openaiMaxTokens}
+                onChange={(e) => setOpenaiMaxTokens(parseInt(e.target.value))}
+                min="1"
+                max="128000"
+                step="1000"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Maximum tokens for response (higher = longer responses). Default: 16000</p>
+            </div>
           </div>
         )}
 
@@ -312,6 +380,32 @@ export default function Settings() {
               />
               <p className="text-xs text-gray-500 mt-1">Examples: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-haiku-20240307</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
+              <input
+                type="number"
+                value={anthropicTemperature}
+                onChange={(e) => setAnthropicTemperature(parseFloat(e.target.value))}
+                min="0"
+                max="1"
+                step="0.1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Controls randomness (0.0 = deterministic, 1.0 = very creative). Default: 0.7</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                value={anthropicMaxTokens}
+                onChange={(e) => setAnthropicMaxTokens(parseInt(e.target.value))}
+                min="1"
+                max="200000"
+                step="1000"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Maximum tokens for response. Default: 4096</p>
+            </div>
           </div>
         )}
 
@@ -340,6 +434,32 @@ export default function Settings() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <p className="text-xs text-gray-500 mt-1">Examples: gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
+              <input
+                type="number"
+                value={geminiTemperature}
+                onChange={(e) => setGeminiTemperature(parseFloat(e.target.value))}
+                min="0"
+                max="2"
+                step="0.1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Controls randomness (0.0 = deterministic, 2.0 = very creative). Default: 0.7</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                value={geminiMaxTokens}
+                onChange={(e) => setGeminiMaxTokens(parseInt(e.target.value))}
+                min="1"
+                max="1000000"
+                step="1000"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Maximum tokens for response. Default: 8192</p>
             </div>
           </div>
         )}
@@ -372,6 +492,19 @@ export default function Settings() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <p className="text-xs text-gray-500 mt-1">Enter the exact model name as configured in your local provider</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
+              <input
+                type="number"
+                value={ollamaTemperature}
+                onChange={(e) => setOllamaTemperature(parseFloat(e.target.value))}
+                min="0"
+                max="2"
+                step="0.1"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Controls randomness (0.0 = deterministic, 2.0 = very creative). Default: 0.7</p>
             </div>
           </div>
         )}

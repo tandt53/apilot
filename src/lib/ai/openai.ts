@@ -128,7 +128,7 @@ export class OpenAIService extends AIService {
         model: this.model,
         messages: messages as any,
         temperature: this.temperature,
-        max_tokens: this.maxTokens,
+        max_completion_tokens: this.maxTokens,
         stream: true,
       })
 

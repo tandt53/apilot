@@ -293,6 +293,9 @@ export default function SpecsNew() {
 
       console.log('[SpecsNew] Continuing with history:', previousMessages ? 'Yes' : 'No')
 
+      // Track saved test names to prevent duplicates
+      const savedTestNames = new Set<string>()
+
       // Generate tests for remaining endpoints with conversation history via IPC
       const result = await generateTestsViaIPC({
         endpoints: endpointsToGenerate,
@@ -304,11 +307,63 @@ export default function SpecsNew() {
         },
         onTestGenerated: async (test: any) => {
           // Save test in real-time as it's generated
+          console.log('[SpecsNew handleContinueGeneration] Received test from IPC:', {
+            name: test.name,
+            method: test.method,
+            path: test.path,
+            testType: test.testType,
+            assertions: test.assertions?.length
+          })
+
+          // Skip if already saved in this session
+          if (savedTestNames.has(test.name)) {
+            console.log('[SpecsNew handleContinueGeneration] Test already saved, skipping:', test.name)
+            return
+          }
+
+          // Mark as saved IMMEDIATELY to prevent race condition with result processing
+          savedTestNames.add(test.name)
+          console.log('[SpecsNew handleContinueGeneration] Marked test as saved:', test.name, '- Total saved:', savedTestNames.size)
+
           await api.createTestCase(test as any)
+
+          // Signal to Tests page that a new test was created (for immediate streaming)
+          localStorage.setItem('tests-last-test-created', String(Date.now()))
+
           // Invalidate test groups query to trigger refetch in Tests page
           queryClient.invalidateQueries({ queryKey: ['test-groups'] })
         },
       })
+
+      // IMPORTANT: Process all tests from result.tests in case IPC events didn't fire
+      // This ensures all tests are saved even if real-time callbacks fail
+      console.log('[SpecsNew handleContinueGeneration] Processing tests from result:', {
+        testsCount: result.tests?.length,
+        completed: result.completed,
+        savedViaCb: savedTestNames.size
+      })
+
+      if (result.tests && result.tests.length > 0) {
+        console.log('[SpecsNew handleContinueGeneration] Checking', result.tests.length, 'tests from result object')
+        for (const test of result.tests) {
+          // Skip if already saved via callback
+          if (savedTestNames.has(test.name)) {
+            console.log('[SpecsNew handleContinueGeneration] Test already saved via callback, skipping:', test.name)
+            continue
+          }
+
+          console.log('[SpecsNew handleContinueGeneration] Saving test from result:', {
+            name: test.name,
+            method: test.method,
+            path: test.path
+          })
+          await api.createTestCase(test as any)
+          savedTestNames.add(test.name)
+        }
+        // Invalidate test groups query to trigger refetch in Tests page
+        queryClient.invalidateQueries({ queryKey: ['test-groups'] })
+        console.log('[SpecsNew handleContinueGeneration] Total unique tests saved:', savedTestNames.size)
+      }
 
       // Handle result - could hit token limit again
       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {
@@ -402,6 +457,9 @@ export default function SpecsNew() {
       const previousMessages = localStorage.getItem('tests-conversation-messages')
       const previousSummary = localStorage.getItem('tests-generated-summary')
 
+      // Track saved test names to prevent duplicates
+      const savedTestNames = new Set<string>()
+
       // Generate tests with streaming via IPC
       const result = await generateTestsViaIPC({
         endpoints: endpointsToGenerate,
@@ -413,11 +471,64 @@ export default function SpecsNew() {
         },
         onTestGenerated: async (test: any) => {
           // Save test in real-time as it's generated
+          console.log('[SpecsNew handleBatchGenerate] Received test from IPC:', {
+            name: test.name,
+            method: test.method,
+            path: test.path,
+            testType: test.testType,
+            assertions: test.assertions?.length
+          })
+
+          // Skip if already saved in this session
+          if (savedTestNames.has(test.name)) {
+            console.log('[SpecsNew handleBatchGenerate] Test already saved, skipping:', test.name)
+            return
+          }
+
+          // Mark as saved IMMEDIATELY to prevent race condition with result processing
+          savedTestNames.add(test.name)
+          console.log('[SpecsNew handleBatchGenerate] Marked test as saved:', test.name, '- Total saved:', savedTestNames.size)
+
           await api.createTestCase(test as any)
-          // Invalidate test groups query to trigger refetch in Tests page
-          queryClient.invalidateQueries({ queryKey: ['test-groups'] })
+
+          // Signal to Tests page that a new test was created (for immediate streaming)
+          localStorage.setItem('tests-last-test-created', String(Date.now()))
+
+          // Invalidate AND refetch immediately for real-time updates in Tests page
+          await queryClient.invalidateQueries({ queryKey: ['test-groups'] })
+          await queryClient.refetchQueries({ queryKey: ['test-groups'] })
         },
       })
+
+      // IMPORTANT: Process all tests from result.tests in case IPC events didn't fire
+      // This ensures all tests are saved even if real-time callbacks fail
+      console.log('[SpecsNew] Processing tests from result:', {
+        testsCount: result.tests?.length,
+        completed: result.completed,
+        savedViaCb: savedTestNames.size
+      })
+
+      if (result.tests && result.tests.length > 0) {
+        console.log('[SpecsNew] Checking', result.tests.length, 'tests from result object')
+        for (const test of result.tests) {
+          // Skip if already saved via callback
+          if (savedTestNames.has(test.name)) {
+            console.log('[SpecsNew] Test already saved via callback, skipping:', test.name)
+            continue
+          }
+
+          console.log('[SpecsNew] Saving test from result:', {
+            name: test.name,
+            method: test.method,
+            path: test.path
+          })
+          await api.createTestCase(test as any)
+          savedTestNames.add(test.name)
+        }
+        // Invalidate test groups query to trigger refetch in Tests page
+        queryClient.invalidateQueries({ queryKey: ['test-groups'] })
+        console.log('[SpecsNew] Total unique tests saved:', savedTestNames.size)
+      }
 
       // Handle partial completion (token limit reached)
       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {

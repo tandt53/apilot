@@ -15,11 +15,19 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Event listeners for test generation progress
   onGenerateTestsProgress: (callback: (progress: any) => void) => {
-    ipcRenderer.on('generate-tests-progress', (_event, progress) => callback(progress))
+    console.log('[Preload] Setting up generate-tests-progress listener')
+    ipcRenderer.on('generate-tests-progress', (_event, progress) => {
+      console.log('[Preload] Received progress event:', progress)
+      callback(progress)
+    })
   },
 
   onGenerateTestsTestGenerated: (callback: (test: any) => void) => {
-    ipcRenderer.on('generate-tests-test-generated', (_event, test) => callback(test))
+    console.log('[Preload] Setting up generate-tests-test-generated listener')
+    ipcRenderer.on('generate-tests-test-generated', (_event, test) => {
+      console.log('[Preload] Received test event:', { name: test.name, method: test.method })
+      callback(test)
+    })
   },
 
   removeGenerateTestsListeners: () => {

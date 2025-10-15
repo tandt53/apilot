@@ -210,11 +210,32 @@ export default function Tests() {
       console.log('[Tests Page] Fetched', totalTests, 'test cases total')
       return groups
     },
-    // Disable caching during generation
+    // Disable caching during generation for real-time updates
     staleTime: isGenerating ? 0 : 30000,
-    refetchInterval: isGenerating ? 2000 : false, // Auto-refetch every 2s while generating
+    refetchInterval: isGenerating ? 200 : false, // Very fast refetch for real-time streaming (200ms)
     refetchOnWindowFocus: false, // Prevent refetch when switching between windows
   })
+
+  // Listen for test creation events from localStorage to trigger immediate refetch
+  useEffect(() => {
+    if (!isGenerating) return
+
+    const checkForNewTests = () => {
+      const lastTestTime = localStorage.getItem('tests-last-test-created')
+      if (lastTestTime) {
+        const timeSinceCreation = Date.now() - parseInt(lastTestTime)
+        // If a test was created in the last 300ms, refetch immediately
+        if (timeSinceCreation < 300) {
+          console.log('[Tests Page] New test detected, triggering immediate refetch')
+          refetch()
+        }
+      }
+    }
+
+    // Check every 100ms for new test signals
+    const interval = setInterval(checkForNewTests, 100)
+    return () => clearInterval(interval)
+  }, [isGenerating, refetch])
 
   // Get all tests (flat list for convenience) - memoized to prevent recalculation
   const allTestCases = useMemo(
