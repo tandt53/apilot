@@ -12,7 +12,10 @@
     "url": "https://github.com/tandt53/apilot/issues"
   },
   "main": "dist-electron/main.js",
-  "author": "tan",
+  "author": {
+    "name": "Tan Do",
+    "email": "dothetan.040490@gmail.com"
+  },
   "license": "MIT",
   "scripts": {
     "dev": "vite",
