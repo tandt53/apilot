@@ -73,3 +73,15 @@ Desktop.ini
 
 # User data (for Electron app)
 test-samples/
+
+# Security - API keys and sensitive data
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+.secrets
+
+# Electron user data directories
+Apilot/
