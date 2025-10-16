@@ -9,6 +9,8 @@ import type {CanonicalEndpoint} from './canonical'
 // API Specification Types
 // ============================================
 
+export type SpecFormat = 'openapi' | 'swagger' | 'postman' | 'curl'
+
 /**
  * API Specification - Root entity
  */
@@ -18,7 +20,8 @@ export interface Spec {
   version: string // API version (e.g., "1.0.0")
   description?: string // Optional description
   baseUrl?: string // Base URL for API
-  rawSpec: string // Original OpenAPI JSON/YAML (stored as string)
+  rawSpec: string // Original spec content (JSON for OpenAPI/Swagger/Postman, cURL command for cURL)
+  format?: SpecFormat // Import format (openapi/swagger/postman/curl) - optional for backward compatibility
 
   // V2: Versioning fields
   versionGroup: string // UUID to group versions together

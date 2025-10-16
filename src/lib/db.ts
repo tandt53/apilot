@@ -31,7 +31,7 @@ export class ApilotDB extends Dexie {
       // Indexes: versionGroup (to query all versions of same API)
       // Indexes: isLatest (to quickly find latest version)
       // Indexes: previousVersionId (to traverse version chain)
-      specs: '++id, name, version, versionGroup, previousVersionId, isLatest, originalName, createdAt, updatedAt',
+      specs: '++id, name, version, versionGroup, previousVersionId, isLatest, originalName, format, createdAt, updatedAt',
 
       // Endpoints table (canonical format)
       // Primary: id (auto-increment)

@@ -119,6 +119,105 @@ describe('convertCurlToCanonical', () => {
       // API key detection may vary
       expect(endpoint.request?.parameters?.some((p) => p.name === 'X-API-Key')).toBe(true)
     })
+
+    it('should handle -u flag for basic auth', () => {
+      const curl = 'curl -u admin:secret https://api.example.com/users'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      const authHeader = endpoint.request?.parameters?.find((p) => p.name === 'Authorization')
+      expect(authHeader).toBeDefined()
+      expect(authHeader?.example).toContain('Basic ')
+    })
+
+    it('should handle URL-embedded auth', () => {
+      const curl = 'curl https://admin:secret@api.example.com/users'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      const authHeader = endpoint.request?.parameters?.find((p) => p.name === 'Authorization')
+      expect(authHeader).toBeDefined()
+      expect(authHeader?.example).toContain('Basic ')
+    })
+  })
+
+  describe('New Parser Features', () => {
+    it('should handle data without quotes', () => {
+      const curl = 'curl -X POST https://api.example.com/users -d {"name":"John"}'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.request?.body).toBeDefined()
+    })
+
+    it('should handle headers without quotes', () => {
+      const curl = 'curl https://api.example.com/users -H Content-Type:application/json'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      const headerParams = endpoint.request?.parameters?.filter((p) => p.in === 'header')
+      expect(headerParams?.some((p) => p.name === 'Content-Type')).toBe(true)
+    })
+
+    it('should handle short flags without spaces', () => {
+      const curl = 'curl -XPOST https://api.example.com/users -H\'Content-Type: application/json\''
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+    })
+
+    it('should handle multiple -d flags', () => {
+      const curl = 'curl https://api.example.com/users -d param1=value1 -d param2=value2'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.request?.body?.example).toContain('param1=value1')
+      expect(endpoint.request?.body?.example).toContain('param2=value2')
+    })
+
+    it('should handle -F flag for multipart form data', () => {
+      const curl = 'curl https://api.example.com/upload -F "file=@photo.jpg" -F "name=John"'
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.request?.contentType).toBe('multipart/form-data')
+      expect(endpoint.request?.body).toBeDefined()
+    })
+
+    it('should default to POST when --data is present without -X', () => {
+      const curl = 'curl https://api.example.com/users --data \'{"name":"John"}\''
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+    })
+
+    it('should handle user-provided curl from issue', () => {
+      const curl = `curl --location 'https://api.openai.com/v1/chat/completions' \\
+--header 'Content-Type: application/json' \\
+--header 'Authorization: Bearer ' \\
+--data '{
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "user",
+            "content": "create a test case for log in feature using email and password."
+        }
+    ],
+    "n": 1,
+    "max_completion_tokens": 500
+}'`
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.path).toBe('/v1/chat/completions')
+      expect(endpoint.request?.contentType).toBe('application/json')
+      expect(endpoint.request?.body).toBeDefined()
+    })
   })
 
   describe('Complex Examples', () => {
