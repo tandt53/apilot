@@ -203,6 +203,7 @@ export default function SpecsNew() {
       description: parsedData.description,
       baseUrl: parsedData.baseUrl || '',
       rawSpec: parsedData.rawSpec,
+      format: detection.format as any, // Store detected format
       versionGroup: crypto.randomUUID(),
       isLatest: true,
       originalName: parsedData.name || sourceName,
@@ -284,8 +285,29 @@ export default function SpecsNew() {
 
       console.log('[SpecsNew] Continuing generation for', endpointsToGenerate.length, 'remaining endpoints')
 
-      // Parse spec for AI
-      const parsedSpec = JSON.parse(selectedSpec.rawSpec)
+      // Parse spec for AI - handle different formats
+      let parsedSpec: any
+      const specFormat = selectedSpec.format || 'openapi' // Default to openapi for backward compatibility
+      if (specFormat === 'curl') {
+        // For cURL imports, create a minimal spec object from the spec metadata
+        parsedSpec = {
+          info: {
+            title: selectedSpec.name,
+            version: selectedSpec.version,
+            description: selectedSpec.description,
+          },
+          servers: selectedSpec.baseUrl ? [{ url: selectedSpec.baseUrl }] : [],
+        }
+      } else {
+        // For OpenAPI/Swagger/Postman, parse the rawSpec JSON
+        try {
+          parsedSpec = JSON.parse(selectedSpec.rawSpec)
+        } catch (error) {
+          console.error('[SpecsNew] Failed to parse rawSpec:', error)
+          alert('Invalid spec format: could not parse specification')
+          return
+        }
+      }
 
       // Get conversation history for continuation
       const previousMessages = localStorage.getItem('tests-conversation-messages')
@@ -450,8 +472,32 @@ export default function SpecsNew() {
       // Get selected endpoints
       const endpointsToGenerate = specEndpoints.filter(e => selectedEndpointIds.has(e.id!))
 
-      // Parse spec for AI
-      const parsedSpec = JSON.parse(selectedSpec.rawSpec)
+      // Parse spec for AI - handle different formats
+      let parsedSpec: any
+      const specFormat = selectedSpec.format || 'openapi' // Default to openapi for backward compatibility
+      if (specFormat === 'curl') {
+        // For cURL imports, create a minimal spec object from the spec metadata
+        parsedSpec = {
+          info: {
+            title: selectedSpec.name,
+            version: selectedSpec.version,
+            description: selectedSpec.description,
+          },
+          servers: selectedSpec.baseUrl ? [{ url: selectedSpec.baseUrl }] : [],
+        }
+      } else {
+        // For OpenAPI/Swagger/Postman, parse the rawSpec JSON
+        try {
+          parsedSpec = JSON.parse(selectedSpec.rawSpec)
+        } catch (error) {
+          console.error('[SpecsNew] Failed to parse rawSpec:', error)
+          alert('Invalid spec format: could not parse specification')
+          setIsGenerating(false)
+          localStorage.removeItem('tests-generating')
+          localStorage.removeItem('tests-generating-spec-id')
+          return
+        }
+      }
 
       // Get conversation history if continuing (should be empty for new generation)
       const previousMessages = localStorage.getItem('tests-conversation-messages')

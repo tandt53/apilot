@@ -9,6 +9,17 @@ import type {CanonicalEndpoint, CanonicalParameter, CanonicalRequestBody} from '
 import { applySmartDefaults } from './smart-defaults'
 
 /**
+ * Base64 encode helper (cross-platform)
+ */
+function base64Encode(str: string): string {
+  if (typeof btoa !== 'undefined') {
+    return btoa(str)
+  }
+  // Node.js environment
+  return Buffer.from(str).toString('base64')
+}
+
+/**
  * Parse cURL command and convert to canonical format
  */
 export function convertCurlToCanonical(curlCommand: string): Omit<CanonicalEndpoint, 'id' | 'specId' | 'createdAt' | 'updatedAt' | 'createdBy'> {
@@ -66,57 +77,133 @@ interface ParsedCurl {
 
 function parseCurlCommand(command: string): ParsedCurl {
   // Remove line continuations and normalize whitespace
-  let normalized = command
+  const normalized = command
     .replace(/\\\r?\n/g, ' ') // Remove backslash line continuations
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim()
-
-  // Remove 'curl' command
-  normalized = normalized.replace(/^curl\s+/i, '')
+    .replace(/^curl\s+/i, '') // Remove 'curl' command
 
   const result: ParsedCurl = {
-    method: 'GET', // Default
+    method: 'GET', // Default (will be changed to POST if --data is present)
     url: '',
     headers: [],
   }
 
-  // Extract method (-X or --request)
-  const methodMatch = normalized.match(/(?:-X|--request)\s+['"]?(\w+)['"]?/)
+  // Extract method (-X or --request, with or without space)
+  // Handles: -X POST, -XPOST, --request POST, --request=POST
+  const methodMatch = normalized.match(/(?:-X|--request)(?:=|\s+)?['"]?(\w+)['"]?/)
   if (methodMatch) {
     result.method = methodMatch[1].toUpperCase()
-    normalized = normalized.replace(methodMatch[0], '')
   }
 
-  // Extract headers (-H or --header)
-  const headerRegex = /(?:-H|--header)\s+['"]([^'"]+)['"]/g
+  // Extract basic auth (-u or --user)
+  // Handles: -u username:password, --user username:password
+  const authMatch = normalized.match(/(?:-u|--user)\s+['"]?([^'"]+?)['"]?(?:\s|$)/)
+  if (authMatch) {
+    const [username, password] = authMatch[1].split(':')
+    // Convert to Base64 for Basic auth
+    const credentials = base64Encode(`${username}:${password || ''}`)
+    result.headers.push({
+      name: 'Authorization',
+      value: `Basic ${credentials}`,
+    })
+  }
+
+  // Extract headers (-H or --header, with or without quotes)
+  // Handles: -H "header: value", -H'header: value', -Hheader:value, --header "header: value"
+  const headerRegex = /(?:-H|--header)(?:=|\s+)?(?:['"]([^'"]+)['"]|([^\s]+))/g
   let headerMatch
   while ((headerMatch = headerRegex.exec(normalized)) !== null) {
-    const headerValue = headerMatch[1]
+    const headerValue = headerMatch[1] || headerMatch[2]
     const [name, ...valueParts] = headerValue.split(':')
     const value = valueParts.join(':').trim()
     result.headers.push({ name: name.trim(), value })
-    normalized = normalized.replace(headerMatch[0], '')
+  }
+
+  // Extract multipart form data (-F or --form)
+  // Handles: -F "field=value", -F "file=@path/to/file"
+  const formRegex = /(?:-F|--form)\s+(?:['"]([^'"]+)['"]|([^\s]+))/g
+  let formMatch
+  const formFields: Array<{ name: string; value: string }> = []
+  while ((formMatch = formRegex.exec(normalized)) !== null) {
+    const formValue = formMatch[1] || formMatch[2]
+    const [name, ...valueParts] = formValue.split('=')
+    const value = valueParts.join('=')
+    formFields.push({ name: name.trim(), value })
+  }
+
+  // If form fields exist, set Content-Type and body
+  if (formFields.length > 0) {
+    result.contentType = 'multipart/form-data'
+    // Convert form fields to object for body
+    result.body = formFields.map(f => {
+      // Handle file uploads (@filename)
+      if (f.value.startsWith('@')) {
+        return `${f.name}=${f.value.substring(1)}`
+      }
+      return `${f.name}=${f.value}`
+    }).join('\n')
   }
 
   // Extract body (-d, --data, --data-raw, --data-binary)
-  const dataRegex = /(?:-d|--data|--data-raw|--data-binary)\s+['"](.+?)['"]/
-  const dataMatch = normalized.match(dataRegex)
-  if (dataMatch) {
-    result.body = dataMatch[1]
-    normalized = normalized.replace(dataMatch[0], '')
+  // Collect ALL data flags and concatenate them
+  const dataRegex = /(?:-d|--data|--data-raw|--data-binary)(?:=|\s+)?(?:['"]([^'"]+?)['"]|([^\s]+))/g
+  let dataMatch
+  const dataParts: string[] = []
+  while ((dataMatch = dataRegex.exec(normalized)) !== null) {
+    const dataValue = dataMatch[1] || dataMatch[2]
+    dataParts.push(dataValue)
+  }
+
+  // If data exists, concatenate and set body
+  if (dataParts.length > 0) {
+    // Check if it's JSON or form data
+    const combinedData = dataParts.join('')
+    const isJson = combinedData.trim().startsWith('{') || combinedData.trim().startsWith('[')
+
+    if (isJson) {
+      result.body = combinedData
+    } else {
+      // Form data - concatenate with &
+      result.body = dataParts.join('&')
+    }
+
+    // If --data is present but no explicit method was set, default to POST
+    if (!methodMatch) {
+      result.method = 'POST'
+    }
   }
 
   // Extract URL (remaining non-flag content)
-  const urlMatch = normalized.match(/['"]?(https?:\/\/[^\s'"]+)['"]?/)
+  // Also handle URL with embedded auth (https://user:pass@host)
+  const urlMatch = normalized.match(/['"]?(https?:\/\/(?:([^:@\s'"]+):([^@\s'"]+)@)?([^\s'"?#]+(?:\?[^\s'"#]*)?(?:#[^\s'"]*)?)?)['"]?/)
   if (urlMatch) {
-    result.url = urlMatch[1]
+    const fullUrl = urlMatch[1]
+    const urlUser = urlMatch[2]
+    const urlPass = urlMatch[3]
+
+    // If URL contains auth, extract it
+    if (urlUser && urlPass) {
+      const credentials = base64Encode(`${urlUser}:${urlPass}`)
+      // Only add if not already added via -u flag
+      if (!result.headers.find(h => h.name.toLowerCase() === 'authorization')) {
+        result.headers.push({
+          name: 'Authorization',
+          value: `Basic ${credentials}`,
+        })
+      }
+      // Remove auth from URL
+      result.url = fullUrl.replace(`${urlUser}:${urlPass}@`, '')
+    } else {
+      result.url = fullUrl
+    }
   } else {
     throw new Error('Could not extract URL from cURL command')
   }
 
-  // Detect Content-Type from headers
+  // Detect Content-Type from headers (unless already set by form data)
   const contentTypeHeader = result.headers.find(h => h.name.toLowerCase() === 'content-type')
-  if (contentTypeHeader) {
+  if (contentTypeHeader && !result.contentType) {
     result.contentType = contentTypeHeader.value
   }
 

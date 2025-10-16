@@ -641,7 +641,30 @@ export default function Tests() {
                         alert('Spec not found')
                         return
                       }
-                      const parsedSpec = JSON.parse(spec.rawSpec)
+
+                      // Parse spec for AI - handle different formats
+                      let parsedSpec: any
+                      const specFormat = spec.format || 'openapi' // Default to openapi for backward compatibility
+                      if (specFormat === 'curl') {
+                        // For cURL imports, create a minimal spec object from the spec metadata
+                        parsedSpec = {
+                          info: {
+                            title: spec.name,
+                            version: spec.version,
+                            description: spec.description,
+                          },
+                          servers: spec.baseUrl ? [{ url: spec.baseUrl }] : [],
+                        }
+                      } else {
+                        // For OpenAPI/Swagger/Postman, parse the rawSpec JSON
+                        try {
+                          parsedSpec = JSON.parse(spec.rawSpec)
+                        } catch (error) {
+                          console.error('[Tests] Failed to parse rawSpec:', error)
+                          alert('Invalid spec format: could not parse specification')
+                          return
+                        }
+                      }
 
                       // Get AI service
                       const aiService = await getCurrentAIService()
