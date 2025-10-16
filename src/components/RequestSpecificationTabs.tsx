@@ -1,7 +1,8 @@
 import {useState} from 'react'
-import {File, Minimize2, Plus, Sparkles, Upload, X} from 'lucide-react'
+import {File, Upload, X} from 'lucide-react'
 import VariableInput from './VariableInput'
 import SchemaRenderer from './SchemaRenderer'
+import FieldEditor, {Field} from './FieldEditor'
 
 interface RequestSpecificationTabsProps {
   endpoint: any
@@ -11,10 +12,16 @@ interface RequestSpecificationTabsProps {
   params?: Record<string, string>
   body?: string
   formData?: Record<string, any>
+  queryParams?: Field[]
+  headerParams?: Field[]
+  bodyFields?: Field[]
   onHeadersChange?: (headers: Record<string, string>) => void
   onParamsChange?: (params: Record<string, string>) => void
   onBodyChange?: (body: string) => void
   onFormDataChange?: (formData: Record<string, any>) => void
+  onQueryParamsChange?: (params: Field[]) => void
+  onHeaderParamsChange?: (headers: Field[]) => void
+  onBodyFieldsChange?: (fields: Field[]) => void
   // Common props
   selectedEnv?: any
   readOnly?: boolean
@@ -29,13 +36,14 @@ export default function RequestSpecificationTabs({
   endpoint,
   mode,
   headers = {},
-  params = {},
-  body = '',
   formData = {},
-  onHeadersChange,
-  onParamsChange,
-  onBodyChange,
+  queryParams = [],
+  headerParams = [],
+  bodyFields = [],
   onFormDataChange,
+  onQueryParamsChange,
+  onHeaderParamsChange,
+  onBodyFieldsChange,
   selectedEnv,
   readOnly = false,
   initialActiveTab = 'params',
@@ -47,136 +55,50 @@ export default function RequestSpecificationTabs({
     setActiveTab(tab)
     onActiveTabChange?.(tab)
   }
-  const [newHeaderKey, setNewHeaderKey] = useState('')
-  const [newHeaderValue, setNewHeaderValue] = useState('')
-  const [newParamKey, setNewParamKey] = useState('')
-  const [newParamValue, setNewParamValue] = useState('')
 
   const isEditable = mode === 'edit' && !readOnly
-
-  const handleAddHeader = () => {
-    if (newHeaderKey && newHeaderValue && onHeadersChange) {
-      onHeadersChange({ ...headers, [newHeaderKey]: newHeaderValue })
-      setNewHeaderKey('')
-      setNewHeaderValue('')
-    }
-  }
-
-  const handleRemoveHeader = (key: string) => {
-    if (onHeadersChange) {
-      const newHeaders = { ...headers }
-      delete newHeaders[key]
-      onHeadersChange(newHeaders)
-    }
-  }
-
-  const handleUpdateHeaderKey = (oldKey: string, newKey: string) => {
-    if (oldKey === newKey || !onHeadersChange) return
-    const newHeaders = { ...headers }
-    const value = newHeaders[oldKey]
-    delete newHeaders[oldKey]
-    if (!newHeaders[newKey]) {
-      newHeaders[newKey] = value
-    }
-    onHeadersChange(newHeaders)
-  }
-
-  const handleAddParam = () => {
-    if (newParamKey && newParamValue && onParamsChange) {
-      onParamsChange({ ...params, [newParamKey]: newParamValue })
-      setNewParamKey('')
-      setNewParamValue('')
-    }
-  }
-
-  const handleRemoveParam = (key: string) => {
-    if (onParamsChange) {
-      const newParams = { ...params }
-      delete newParams[key]
-      onParamsChange(newParams)
-    }
-  }
-
-  const handleUpdateParamKey = (oldKey: string, newKey: string) => {
-    if (oldKey === newKey || !onParamsChange) return
-    const newParams = { ...params }
-    const value = newParams[oldKey]
-    delete newParams[oldKey]
-    if (!newParams[newKey]) {
-      newParams[newKey] = value
-    }
-    onParamsChange(newParams)
-  }
-
-  const handleBeautify = () => {
-    if (!onBodyChange) return
-    try {
-      const parsed = JSON.parse(body)
-      const formatted = JSON.stringify(parsed, null, 2)
-      onBodyChange(formatted)
-    } catch (error: any) {
-      alert('Invalid JSON: ' + error.message)
-    }
-  }
-
-  const handleMinify = () => {
-    if (!onBodyChange) return
-    try {
-      const parsed = JSON.parse(body)
-      const minified = JSON.stringify(parsed)
-      onBodyChange(minified)
-    } catch (error: any) {
-      alert('Invalid JSON: ' + error.message)
-    }
-  }
 
   const method = endpoint.method || 'GET'
   const contentType = mode === 'edit' ? (headers['Content-Type'] || 'application/json') : (endpoint.request?.contentType || 'application/json')
 
   return (
-    <>
+    <div>
       {/* Tabs */}
-      <div className={mode === 'view' ? 'border-b border-gray-200' : 'mb-4'}>
-        <div className={`flex gap-1 ${mode === 'view' ? 'px-4' : ''}`}>
+      <div className="mb-4">
+        <div className="flex gap-4 border-b border-gray-200">
           <button
             onClick={() => handleTabChange('params')}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              mode === 'view'
-                ? `border-b-2 ${activeTab === 'params' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`
-                : `rounded-t ${activeTab === 'params' ? 'bg-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`
+            className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
+              activeTab === 'params' ? 'text-purple-600' : 'text-gray-600 hover:text-gray-900'
             }`}
+            style={activeTab === 'params' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
           >
             Params
           </button>
           <button
             onClick={() => handleTabChange('headers')}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              mode === 'view'
-                ? `border-b-2 ${activeTab === 'headers' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`
-                : `rounded-t ${activeTab === 'headers' ? 'bg-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`
+            className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
+              activeTab === 'headers' ? 'text-purple-600' : 'text-gray-600 hover:text-gray-900'
             }`}
+            style={activeTab === 'headers' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
           >
             Headers
           </button>
-          {method !== 'GET' && method !== 'HEAD' && (
-            <button
-              onClick={() => handleTabChange('body')}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                mode === 'view'
-                  ? `border-b-2 ${activeTab === 'body' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`
-                  : `rounded-t ${activeTab === 'body' ? 'bg-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`
-              }`}
-            >
-              Body
-            </button>
-          )}
+          <button
+            onClick={() => handleTabChange('body')}
+            className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
+              activeTab === 'body' ? 'text-purple-600' : 'text-gray-600 hover:text-gray-900'
+            }`}
+            style={activeTab === 'body' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
+          >
+            Body
+          </button>
           <button
             onClick={() => handleTabChange('auth')}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              mode === 'view'
-                ? `border-b-2 ${activeTab === 'auth' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`
-                : `rounded-t ${activeTab === 'auth' ? 'bg-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`
+            className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
+              activeTab === 'auth' ? 'text-purple-600' : 'text-gray-600 hover:text-gray-900'
             }`}
+            style={activeTab === 'auth' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
           >
             Auth
           </button>
@@ -184,115 +106,27 @@ export default function RequestSpecificationTabs({
       </div>
 
       {/* Tab Content */}
-      <div className={mode === 'view' ? 'p-4' : 'mb-4'}>
+      <div className="mb-4">
         {/* Params Tab */}
         {activeTab === 'params' && (
           <div>
             {mode === 'view' ? (
               // View mode - show spec parameters
-              endpoint.request?.parameters && endpoint.request.parameters.filter((p: any) => p.in === 'query').length > 0 ? (
-                <div>
-                  <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Query Parameters</h5>
-                  <div className="space-y-2">
-                    {endpoint.request.parameters.filter((p: any) => p.in === 'query').map((param: any, idx: number) => (
-                      <div key={idx} className="p-3 bg-gray-50 rounded border border-gray-200">
-                        <div className="flex items-center gap-2 mb-1">
-                          <code className="text-sm font-mono text-gray-900">{param.name}</code>
-                          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{param.type}</span>
-                          {param.required && (
-                            <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">required</span>
-                          )}
-                        </div>
-                        {param.description && (
-                          <p className="text-xs text-gray-600 mt-1">{param.description}</p>
-                        )}
-                        {param.example !== undefined && (
-                          <div className="mt-2 text-xs">
-                            <span className="font-medium text-gray-600">Example:</span>{' '}
-                            <code className="text-purple-600">{JSON.stringify(param.example)}</code>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">No query parameters</p>
-              )
+              <FieldEditor
+                fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []}
+                mode="view"
+                title="Query Parameters"
+                emptyMessage="No query parameters"
+              />
             ) : (
-              // Edit mode - editable params
-              <div className="space-y-2">
-                {Object.entries(params).length > 0 ? (
-                  <>
-                    {Object.entries(params).map(([key, value], index) => (
-                      <div key={`${key}-${index}`} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          defaultValue={key}
-                          onBlur={(e) => {
-                            if (e.target.value !== key) {
-                              handleUpdateParamKey(key, e.target.value)
-                            }
-                          }}
-                          disabled={readOnly}
-                          className={`flex-1 border border-gray-300 rounded px-3 py-2 text-sm ${
-                            readOnly ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''
-                          }`}
-                          placeholder="Parameter name"
-                        />
-                        <div className="flex-1">
-                          <VariableInput
-                            value={value}
-                            onChange={(newValue) => onParamsChange?.({ ...params, [key]: newValue })}
-                            variables={selectedEnv?.variables || {}}
-                            disabled={readOnly}
-                            placeholder="Parameter value"
-                          />
-                        </div>
-                        {isEditable && (
-                          <button
-                            onClick={() => handleRemoveParam(key)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded"
-                          >
-                            <X size={16} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {isEditable && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Parameter name"
-                          value={newParamKey}
-                          onChange={(e) => setNewParamKey(e.target.value)}
-                          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
-                        />
-                        <div className="flex-1">
-                          <VariableInput
-                            value={newParamValue}
-                            onChange={setNewParamValue}
-                            variables={selectedEnv?.variables || {}}
-                            placeholder="Parameter value"
-                          />
-                        </div>
-                        <button
-                          onClick={handleAddParam}
-                          className="p-2 text-purple-600 hover:bg-purple-50 rounded"
-                          disabled={!newParamKey || !newParamValue}
-                        >
-                          <Plus size={16} />
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <p className="text-sm">No parameters defined</p>
-                    {isEditable && <p className="text-xs mt-2">Add parameters below</p>}
-                  </div>
-                )}
-              </div>
+              // Edit mode - editable params using FieldEditor
+              <FieldEditor
+                fields={queryParams}
+                onFieldsChange={onQueryParamsChange}
+                mode="edit"
+                title="Query Parameters"
+                emptyMessage="No parameters defined"
+              />
             )}
           </div>
         )}
@@ -301,124 +135,49 @@ export default function RequestSpecificationTabs({
         {activeTab === 'headers' && (
           <div>
             {mode === 'view' ? (
-              endpoint.request.parameters?.filter((p: any) => p.in === 'header').length ? (
-                <div className="space-y-2">
-                  {endpoint.request.parameters.filter((p: any) => p.in === 'header').map((param: any, idx: number) => (
-                    <div key={idx} className="p-3 bg-gray-50 rounded border border-gray-200">
-                      <div className="flex items-center gap-2 mb-1">
-                        <code className="text-sm font-mono text-gray-900">{param.name}</code>
-                        <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{param.type}</span>
-                        {param.required && (
-                          <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">required</span>
-                        )}
-                      </div>
-                      {param.description && (
-                        <p className="text-xs text-gray-600 mt-1">{param.description}</p>
-                      )}
-                      {param.example !== undefined && (
-                        <div className="mt-2 text-xs">
-                          <span className="font-medium text-gray-600">Example:</span>{' '}
-                          <code className="text-purple-600">{JSON.stringify(param.example)}</code>
-                        </div>
-                      )}
+              <div className="space-y-4">
+                {/* Content-Type Display */}
+                {endpoint.request?.contentType && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-700">Content-Type:</span>
+                      <code className="text-sm text-purple-600 font-mono">{endpoint.request.contentType}</code>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">No headers</p>
-              )
-            ) : (
-              <div className="space-y-2">
-                {Object.entries(headers).length > 0 ? (
-                  <>
-                    {Object.entries(headers).map(([key, value], index) => (
-                      <div key={`${key}-${index}`} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          defaultValue={key}
-                          onBlur={(e) => {
-                            if (e.target.value !== key) {
-                              handleUpdateHeaderKey(key, e.target.value)
-                            }
-                          }}
-                          disabled={readOnly}
-                          className={`flex-1 border border-gray-300 rounded px-3 py-2 text-sm ${
-                            readOnly ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''
-                          }`}
-                          placeholder="Header name"
-                        />
-                        <div className="flex-1">
-                          <VariableInput
-                            value={value}
-                            onChange={(newValue) => onHeadersChange?.({ ...headers, [key]: newValue })}
-                            variables={selectedEnv?.variables || {}}
-                            disabled={readOnly}
-                            placeholder="Header value"
-                          />
-                        </div>
-                        {isEditable && (
-                          <button
-                            onClick={() => handleRemoveHeader(key)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded"
-                          >
-                            <X size={16} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {isEditable && (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Header name"
-                          value={newHeaderKey}
-                          onChange={(e) => setNewHeaderKey(e.target.value)}
-                          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm"
-                        />
-                        <div className="flex-1">
-                          <VariableInput
-                            value={newHeaderValue}
-                            onChange={setNewHeaderValue}
-                            variables={selectedEnv?.variables || {}}
-                            placeholder="Header value"
-                          />
-                        </div>
-                        <button
-                          onClick={handleAddHeader}
-                          className="p-2 text-purple-600 hover:bg-purple-50 rounded"
-                          disabled={!newHeaderKey || !newHeaderValue}
-                        >
-                          <Plus size={16} />
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <p className="text-sm">No headers defined</p>
-                    {isEditable && <p className="text-xs mt-2">Add headers below</p>}
                   </div>
                 )}
+
+                {/* Header Parameters */}
+                {endpoint.request.parameters?.filter((p: any) => p.in === 'header').length > 0 ? (
+                  <FieldEditor
+                    fields={endpoint.request.parameters.filter((p: any) => p.in === 'header')}
+                    mode="view"
+                    title="Headers"
+                    emptyMessage="No headers"
+                  />
+                ) : !endpoint.request?.contentType && (
+                  <p className="text-sm text-gray-500 italic">No headers</p>
+                )}
               </div>
+            ) : (
+              // Edit mode - editable headers using FieldEditor
+              <FieldEditor
+                fields={headerParams}
+                onFieldsChange={onHeaderParamsChange}
+                mode="edit"
+                title="Headers"
+                emptyMessage="No headers defined"
+              />
             )}
           </div>
         )}
 
         {/* Body Tab */}
-        {activeTab === 'body' && method !== 'GET' && method !== 'HEAD' && (
+        {activeTab === 'body' && (
           <div>
             {mode === 'view' ? (
               // View mode
               endpoint.request?.body ? (
                 <div>
-                  {endpoint.request.contentType && (
-                    <div className="mb-3">
-                      <span className="text-xs font-semibold text-gray-500 uppercase">Content-Type</span>
-                      <div className="mt-1">
-                        <span className="text-xs font-mono px-2 py-1 bg-gray-100 text-gray-700 rounded">{endpoint.request.contentType}</span>
-                      </div>
-                    </div>
-                  )}
                   {endpoint.request.body.description && (
                     <p className="text-sm text-gray-600 mb-3">{endpoint.request.body.description}</p>
                   )}
@@ -434,34 +193,12 @@ export default function RequestSpecificationTabs({
                     </div>
                   )}
                   {endpoint.request.body.fields && endpoint.request.body.fields.length > 0 && (
-                    <div>
-                      <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Fields</h5>
-                      <div className="space-y-2">
-                        {endpoint.request.body.fields.map((field: any, idx: number) => (
-                          <div key={idx} className="p-3 bg-gray-50 rounded border border-gray-200">
-                            <div className="flex items-center gap-2 mb-1">
-                              <code className="text-sm font-mono text-gray-900">{field.name}</code>
-                              <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{field.type}</span>
-                              {field.format && (
-                                <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">{field.format}</span>
-                              )}
-                              {field.required && (
-                                <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">required</span>
-                              )}
-                            </div>
-                            {field.description && (
-                              <p className="text-xs text-gray-600 mt-1">{field.description}</p>
-                            )}
-                            {field.example !== undefined && (
-                              <div className="mt-2 text-xs">
-                                <span className="font-medium text-gray-600">Example:</span>{' '}
-                                <code className="text-purple-600">{JSON.stringify(field.example)}</code>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <FieldEditor
+                      fields={endpoint.request.body.fields}
+                      mode="view"
+                      title="Fields"
+                      emptyMessage="No fields defined"
+                    />
                   )}
                   {endpoint.request.body.schema && (
                     <SchemaRenderer schema={endpoint.request.body.schema} />
@@ -555,39 +292,14 @@ export default function RequestSpecificationTabs({
                     )}
                   </div>
                 ) : (
-                  // JSON body
+                  // JSON body - Use FieldEditor for editing structure
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="block text-sm font-medium text-gray-700">Request Body (JSON)</label>
-                      {isEditable && body.trim() && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleBeautify}
-                            className="flex items-center gap-1 px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                            title="Format JSON"
-                          >
-                            <Sparkles size={14} />
-                            Beautify
-                          </button>
-                          <button
-                            onClick={handleMinify}
-                            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                            title="Minify JSON"
-                          >
-                            <Minimize2 size={14} />
-                            Minify
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <VariableInput
-                      value={body}
-                      onChange={(value) => onBodyChange?.(value)}
-                      variables={selectedEnv?.variables || {}}
-                      disabled={readOnly}
-                      placeholder='{"key": "value"}'
-                      multiline={true}
-                      rows={8}
+                    <FieldEditor
+                      fields={bodyFields}
+                      onFieldsChange={onBodyFieldsChange}
+                      mode={mode}
+                      title="Body Fields"
+                      emptyMessage="No body fields defined"
                     />
                   </div>
                 )}
@@ -651,6 +363,6 @@ export default function RequestSpecificationTabs({
           </div>
         )}
       </div>
-    </>
+    </div>
   )
 }

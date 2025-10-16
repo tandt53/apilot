@@ -5,6 +5,7 @@ import RequestSpecificationTabs from './RequestSpecificationTabs'
 import ResponseDisplay from './ResponseDisplay'
 import AssertionsSection from './AssertionsSection'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
+import {getMethodColor} from '@/lib/utils/methodColors'
 
 interface Assertion {
     type: string
@@ -563,14 +564,8 @@ export default function RequestTester({
                 <div className="p-4">
                     {/* URL and Method */}
                     <div className="mb-4">
-                        <div className="flex gap-2">
-              <span className={`px-4 py-2 rounded font-semibold text-sm ${
-                  method === 'GET' ? 'bg-green-100 text-green-700' :
-                      method === 'POST' ? 'bg-blue-100 text-blue-700' :
-                          method === 'PUT' ? 'bg-orange-100 text-orange-700' :
-                              method === 'DELETE' ? 'bg-red-100 text-red-700' :
-                                  'bg-gray-100 text-gray-700'
-              }`}>
+                        <div className="flex items-center gap-2">
+              <span className={`px-4 py-2 rounded font-semibold text-sm ${getMethodColor(method)}`}>
                 {method}
               </span>
                             <div className="flex-1">

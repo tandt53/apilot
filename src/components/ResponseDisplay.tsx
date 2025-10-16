@@ -70,24 +70,26 @@ export default function ResponseDisplay({ response, error, responseTime, initial
 
           {/* Response Tabs */}
           <div className="px-4 mb-4">
-            <div className="flex gap-1">
+            <div className="flex gap-4 border-b border-gray-200">
               <button
                 onClick={() => handleTabChange('body')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
                   responseTab === 'body'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'text-purple-600'
+                    : 'text-gray-600 hover:text-gray-900'
                 }`}
+                style={responseTab === 'body' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
               >
                 Body
               </button>
               <button
                 onClick={() => handleTabChange('headers')}
-                className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                className={`px-3 pb-1.5 text-sm font-medium transition-colors -mb-px ${
                   responseTab === 'headers'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'text-purple-600'
+                    : 'text-gray-600 hover:text-gray-900'
                 }`}
+                style={responseTab === 'headers' ? { borderBottom: '3px solid rgb(147, 51, 234)' } : { borderBottom: '3px solid transparent' }}
               >
                 Headers
               </button>

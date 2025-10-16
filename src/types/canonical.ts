@@ -99,19 +99,6 @@ export interface CanonicalRequest {
 }
 
 /**
- * Response Field Definition
- */
-export interface CanonicalResponseField {
-  name: string
-  type: string
-  description?: string
-  format?: string
-  required?: boolean
-  example?: any
-  enum?: any[]
-}
-
-/**
  * Success Response
  */
 export interface CanonicalSuccessResponse {
@@ -122,8 +109,8 @@ export interface CanonicalSuccessResponse {
   // Concrete example (ready for assertions)
   example?: any                     // {id: 1, name: "John", email: "john@example.com"}
 
-  // Field definitions (for understanding structure)
-  fields?: CanonicalResponseField[]
+  // Field definitions (for understanding structure) - uses CanonicalField to support nesting
+  fields?: CanonicalField[]
 
   // Response headers
   headers?: Array<{

@@ -9,7 +9,6 @@ import {
     FolderOpen,
     Loader2,
     RefreshCw,
-    Save,
     Search,
     Trash2,
     X,
@@ -20,6 +19,7 @@ import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
+import SaveCancelButtons from '@/components/SaveCancelButtons'
 import {useEnvironments} from '@/lib/hooks'
 import type {Spec, TestCase} from '@/types/database'
 
@@ -997,8 +997,8 @@ export default function Tests() {
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Save button - only enabled if changes detected */}
-                    <button
-                      onClick={async () => {
+                    <SaveCancelButtons
+                      onSave={async () => {
                         try {
                           const updates: any = {}
 
@@ -1030,17 +1030,11 @@ export default function Tests() {
                           console.error('Failed to save changes:', error)
                         }
                       }}
-                      disabled={!hasUnsavedChanges}
-                      className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${
-                        hasUnsavedChanges
-                          ? 'bg-purple-600 text-white hover:bg-purple-700'
-                          : 'text-gray-300 cursor-not-allowed'
-                      }`}
-                      title={hasUnsavedChanges ? "Save changes" : "No changes to save"}
-                    >
-                      <Save size={18} />
-                      {hasUnsavedChanges && <span className="text-sm font-medium">Save</span>}
-                    </button>
+                      hasUnsavedChanges={hasUnsavedChanges}
+                      compact={true}
+                      saveOnly={true}
+                      saveLabel="Save changes"
+                    />
                     {/* Delete button */}
                     <button
                       onClick={() => handleDelete(selectedTest.id!, selectedTest.name)}
