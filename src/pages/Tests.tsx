@@ -14,12 +14,14 @@ import {
     X,
 } from 'lucide-react'
 import * as api from '@/lib/api'
+import {deleteTestCasesBySpec} from '@/lib/api/testCases'
 import RequestTester, {SessionState} from '@/components/RequestTester'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
 import SaveCancelButtons from '@/components/SaveCancelButtons'
+import Button from '@/components/Button'
 import {useEnvironments} from '@/lib/hooks'
 import type {Spec, TestCase} from '@/types/database'
 
@@ -40,17 +42,23 @@ const getSessionKey = (testId: number, stepIndex?: number) => {
 const loadSession = (testId: number, stepIndex?: number): Partial<SessionState> | undefined => {
   try {
     const saved = localStorage.getItem(getSessionKey(testId, stepIndex))
-    return saved ? JSON.parse(saved) : undefined
-  } catch {
+    if (!saved) return undefined
+
+    const parsed = JSON.parse(saved)
+    console.log('[Tests] Loaded session for test', testId, ':', parsed)
+    return parsed
+  } catch (error) {
+    console.error('[Tests] Failed to load session:', error)
     return undefined
   }
 }
 
 const saveSession = (testId: number, session: SessionState, stepIndex?: number) => {
   try {
+    console.log('[Tests] Saving session for test', testId, ':', session)
     localStorage.setItem(getSessionKey(testId, stepIndex), JSON.stringify(session))
   } catch (error) {
-    console.error('Failed to save session:', error)
+    console.error('[Tests] Failed to save session:', error)
   }
 }
 
@@ -248,6 +256,17 @@ export default function Tests() {
     [allTestCases, selectedTestId]
   )
 
+  // Memoize session to avoid recreating on every render
+  const initialSessionForSingleTest = useMemo(
+    () => selectedTest?.id ? loadSession(selectedTest.id) : undefined,
+    [selectedTest?.id]
+  )
+
+  const initialSessionForWorkflowStep = useMemo(
+    () => selectedTest?.id && selectedStepIndex !== null ? loadSession(selectedTest.id, selectedStepIndex) : undefined,
+    [selectedTest?.id, selectedStepIndex]
+  )
+
   // Auto-expand the generating spec and its sections when generation starts
   useEffect(() => {
     if (isGenerating && generatingSpecId) {
@@ -264,12 +283,12 @@ export default function Tests() {
     }
   }, [isGenerating, generatingSpecId])
 
-  // Auto-scroll to bottom of generating spec's test list when tests are added
+  // Auto-scroll to skeleton when generation starts (only once, not on every test added)
   useEffect(() => {
     if (isGenerating && generatingSpecId && testListRef.current) {
-      testListRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      testListRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [testGroups, isGenerating, generatingSpecId])
+  }, [isGenerating, generatingSpecId])
 
   // Sync test name and description when selectedTest changes
   useEffect(() => {
@@ -557,9 +576,9 @@ export default function Tests() {
               </button>
             </div>
 
-            {/* Generating Banner */}
+            {/* Generating Banner - Sticky at top */}
             {isGenerating && (
-              <div className="m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0">
+              <div className="sticky top-0 z-10 m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0 shadow-lg">
                 <Loader2 size={18} className="text-blue-600 animate-spin flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold text-blue-900">Generating Tests</h3>
@@ -737,7 +756,7 @@ export default function Tests() {
               <p className="text-sm text-gray-600">Generate tests from your API specifications</p>
             </div>
           ) : (
-            <div className="p-4 pb-24 space-y-2 flex-1 overflow-auto">
+            <div className="p-4 pb-40 space-y-2 flex-1 overflow-auto">
               {testGroups
                 .map(group => {
                   const query = searchQuery.toLowerCase()
@@ -939,6 +958,37 @@ export default function Tests() {
                       <p className="text-sm text-gray-600 mt-2">{selectedSpec.description}</p>
                     )}
                   </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const group = testGroups?.find(g => g.spec.id === selectedSpecId)
+                      const totalTests = (group?.singleTests.length || 0) + (group?.workflowTests.length || 0)
+
+                      return totalTests > 0 ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={Trash2}
+                          onClick={async () => {
+                            const confirmed = window.confirm(
+                              `Delete all tests for "${selectedSpec.name}"?\n\nThis will delete ${totalTests} test(s) and their execution history. The spec itself will NOT be deleted.`
+                            )
+                            if (confirmed) {
+                              try {
+                                await deleteTestCasesBySpec(selectedSpecId!)
+                                refetch()
+                                setSelectedTestId(null)
+                              } catch (error: any) {
+                                alert(`Failed to delete tests: ${error.message}`)
+                              }
+                            }
+                          }}
+                          title="Delete all tests for this spec"
+                        />
+                      ) : null
+                    })()}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-sm">
@@ -1036,13 +1086,13 @@ export default function Tests() {
                       saveLabel="Save changes"
                     />
                     {/* Delete button */}
-                    <button
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={Trash2}
                       onClick={() => handleDelete(selectedTest.id!, selectedTest.name)}
-                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       title="Delete test"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    />
                   </div>
                 </div>
               </div>
@@ -1068,10 +1118,10 @@ export default function Tests() {
                           if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
                             fields.push({
                               name: key,
-                              type: 'string',
+                              type: 'file',
                               format: 'binary',
                               required: false,
-                              example: undefined,
+                              example: value,
                               description: 'File upload'
                             })
                           } else {
@@ -1127,7 +1177,7 @@ export default function Tests() {
                           ],
                           body
                         },
-                        // Add assertions for display
+                        // Current test assertions (will be used as initial state)
                         assertions: selectedTest.assertions
                       } as any}
                       testCase={selectedTest}
@@ -1140,8 +1190,9 @@ export default function Tests() {
                       environments={environments}
                       selectedEnvId={selectedEnvId}
                       onEnvChange={setSelectedEnvId}
-                      initialSession={loadSession(selectedTest.id!)}
+                      initialSession={initialSessionForSingleTest}
                       onSessionChange={(session) => saveSession(selectedTest.id!, session)}
+                      defaultAssertions={selectedTest.assertions}
                     />
                   )
                 })()
@@ -1287,7 +1338,7 @@ export default function Tests() {
                             environments={environments}
                             selectedEnvId={selectedEnvId}
                             onEnvChange={setSelectedEnvId}
-                            initialSession={loadSession(selectedTest.id!, selectedStepIndex)}
+                            initialSession={initialSessionForWorkflowStep}
                             onSessionChange={(session) => saveSession(selectedTest.id!, session, selectedStepIndex)}
                           />
                         )

@@ -90,6 +90,26 @@ export async function deleteTestCase(id: number): Promise<void> {
 }
 
 /**
+ * Delete all test cases for a spec (and all their executions)
+ */
+export async function deleteTestCasesBySpec(specId: number): Promise<void> {
+  const testCases = await db.testCases.where('specId').equals(specId).toArray()
+
+  // Delete all test cases and their executions in a transaction
+  await db.transaction('rw', [db.testCases, db.executions], async () => {
+    // Delete all executions for this spec's tests
+    for (const testCase of testCases) {
+      if (testCase.id) {
+        await db.executions.where('testCaseId').equals(testCase.id).delete()
+      }
+    }
+
+    // Delete all test cases for this spec
+    await db.testCases.where('specId').equals(specId).delete()
+  })
+}
+
+/**
  * Get test cases by category
  */
 export async function getTestCasesByCategory(specId: number, category: string): Promise<TestCase[]> {

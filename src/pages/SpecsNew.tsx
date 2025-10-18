@@ -2,13 +2,14 @@ import {useEffect, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {useQuery, useQueryClient} from '@tanstack/react-query'
 import {useEnvironments, useSpecs} from '@/lib/hooks'
-import {FileCode, FolderClosed, FolderOpen, Search, Settings2, Trash2, Upload, X} from 'lucide-react'
+import {Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Settings2, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
 import * as api from '@/lib/api'
 import EndpointDetail from '@/components/EndpointDetail'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
+import Button from '@/components/Button'
 import type {Endpoint, Spec} from '@/types/database'
 import {generateTestsViaIPC} from "@/lib/ai/client.ts";
 
@@ -43,6 +44,7 @@ export default function SpecsNew() {
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<number>>(new Set())
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null)
+  const [selectionModeSpecId, setSelectionModeSpecId] = useState<number | null>(null)
 
   // Continue generation states (for token limit handling)
   const [remainingEndpointIds, setRemainingEndpointIds] = useState<Set<number>>(new Set())
@@ -251,7 +253,91 @@ export default function SpecsNew() {
     if (selectedSpecId === specId) {
       setSelectedSpecId(null)
     }
+    await refetch()
+  }
+
+  const handleEditSpec = (specId: number) => {
+    // TODO: Implement edit spec modal/page
+    alert('Edit spec feature coming soon')
+  }
+
+  const handleExportSpec = async (spec: Spec) => {
+    try {
+      // Export as OpenAPI JSON
+      const exportData = {
+        ...JSON.parse(spec.rawSpec),
+        info: {
+          title: spec.name,
+          version: spec.version,
+          description: spec.description,
+        }
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${spec.name.replace(/\s+/g, '-')}-${spec.version}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export failed:', error)
+      alert('Failed to export spec')
+    }
+  }
+
+  const handleDuplicateSpec = async (spec: Spec) => {
+    try {
+      // Create a new spec with duplicated data
+      const newSpec = await api.createSpec({
+        name: `${spec.name} (Copy)`,
+        version: spec.version,
+        description: spec.description,
+        baseUrl: spec.baseUrl,
+        rawSpec: spec.rawSpec,
+        format: spec.format,
+        versionGroup: crypto.randomUUID(),
+        isLatest: true,
+        originalName: spec.originalName,
+      })
+
+      // Duplicate all endpoints
+      const specGroup = specGroups?.find(g => g.spec.id === spec.id)
+      const endpoints = specGroup?.endpoints || []
+
+      if (endpoints.length > 0) {
+        const endpointsData = endpoints.map(endpoint => ({
+          specId: newSpec.id!,
+          method: endpoint.method,
+          path: endpoint.path,
+          name: endpoint.name,
+          description: endpoint.description,
+          request: endpoint.request,
+          responses: endpoint.responses,
+          auth: endpoint.auth,
+          source: endpoint.source,
+          updatedAt: new Date(),
+          createdBy: 'manual' as const,
+        }))
+        await api.bulkCreateEndpoints(endpointsData)
+      }
+
+      // Refetch specs and spec-groups
       await refetch()
+      await queryClient.invalidateQueries({ queryKey: ['specs'] })
+      await queryClient.refetchQueries({ queryKey: ['spec-groups'] })
+
+      // Select the new duplicated spec
+      setSelectedSpecId(newSpec.id!)
+      setExpandedSpecs(prev => new Set(prev).add(newSpec.id!))
+
+      alert(`✓ Successfully duplicated spec with ${endpoints.length} endpoint(s)`)
+    } catch (error) {
+      console.error('Duplicate failed:', error)
+      alert('Failed to duplicate spec')
+    }
   }
 
   const handleContinueGeneration = async () => {
@@ -750,7 +836,65 @@ export default function SpecsNew() {
                             <p className="text-xs text-gray-500">v{spec.version}</p>
                           </div>
                         </button>
+
+                        {/* Generate Tests / Actions - Only show when expanded */}
+                        {isExpanded && (
+                          <div className="flex items-center gap-1">
+                            {selectionModeSpecId === spec.id ? (
+                              // Selection mode: Show Generate + Cancel buttons
+                              <>
+                                <Button
+                                  variant="save"
+                                  size="sm"
+                                  icon={Zap}
+                                  highlighted={selectedCountForSpec > 0}
+                                  onClick={() => handleBatchGenerate()}
+                                  disabled={isGenerating || selectedCountForSpec === 0}
+                                  title={selectedCountForSpec > 0 ? `Generate tests for ${selectedCountForSpec} endpoints` : 'Select endpoints first'}
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  icon={X}
+                                  onClick={() => {
+                                    setSelectionModeSpecId(null)
+                                    setSelectedEndpointIds(new Set())
+                                  }}
+                                  title="Cancel selection"
+                                />
+                              </>
+                            ) : (
+                              // Normal mode: Show trigger button (highlighted)
+                              <Button
+                                variant="save"
+                                size="sm"
+                                icon={Sparkles}
+                                highlighted={true}
+                                onClick={() => {
+                                  setSelectionModeSpecId(spec.id!)
+                                  setSelectedEndpointIds(new Set())
+                                }}
+                                title="Generate tests"
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
+
+                      {/* Selection Mode Info Banner */}
+                      {isExpanded && selectionModeSpecId === spec.id && (
+                        <div className="ml-2 mt-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-700">
+                            {selectedCountForSpec === 0 ? (
+                              'Select up to 5 endpoints to generate tests'
+                            ) : selectedCountForSpec >= 5 ? (
+                              `✓ Maximum 5 endpoints selected`
+                            ) : (
+                              `${selectedCountForSpec} of 5 endpoints selected`
+                            )}
+                          </p>
+                        </div>
+                      )}
 
                       {/* Partial Generation Warning - shown when token limit reached */}
                       {isExpanded && showContinueButton && partialGenerationMessage && spec.id === selectedSpecId && (
@@ -759,72 +903,42 @@ export default function SpecsNew() {
                         </div>
                       )}
 
-                      {/* Generate/Continue Tests Button - shown when spec is expanded and has selected endpoints */}
-                      {isExpanded && (selectedCountForSpec > 0 || (showContinueButton && spec.id === selectedSpecId)) && (
-                        <div className="ml-2 mt-2 mb-1">
-                          <button
-                            onClick={() => {
-                              if (showContinueButton && spec.id === selectedSpecId) {
-                                // Call continue handler if we're in continue mode
-                                handleContinueGeneration()
-                              } else {
-                                handleBatchGenerate()
-                              }
-                            }}
-                            disabled={isGenerating}
-                            className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed text-sm ${
-                              showContinueButton && spec.id === selectedSpecId
-                                ? 'bg-orange-600 hover:bg-orange-700'
-                                : 'bg-purple-600 hover:bg-purple-700'
-                            }`}
-                          >
-                            {isGenerating ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                Generating {generationProgress?.current || 0}/{generationProgress?.total || 0}
-                              </>
-                            ) : showContinueButton && spec.id === selectedSpecId ? (
-                              <>
-                                <Settings2 size={16} />
-                                Continue Generation ({remainingEndpointIds.size} remaining)
-                              </>
-                            ) : (
-                              <>
-                                <Settings2 size={16} />
-                                Generate Tests ({selectedCountForSpec})
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
-
                       {/* Endpoints List */}
                       {isExpanded && filteredEndpoints.length > 0 && (
                         <div className="ml-2 mt-1 space-y-1">
-                          {filteredEndpoints.map((endpoint) => (
-                            <EndpointCard
-                              key={endpoint.id}
-                              method={endpoint.method}
-                              path={endpoint.path}
-                              name={endpoint.name}
-                              isSelected={endpoint.id === selectedEndpointId}
-                              onClick={() => {
-                                setSelectedEndpointId(endpoint.id!)
-                                setSelectedSpecId(spec.id!)
-                              }}
-                              showCheckbox={true}
-                              isChecked={selectedEndpointIds.has(endpoint.id!)}
-                              onCheckboxChange={(checked) => {
-                                const newSelected = new Set(selectedEndpointIds)
-                                if (checked) {
-                                  newSelected.add(endpoint.id!)
-                                } else {
-                                  newSelected.delete(endpoint.id!)
-                                }
-                                setSelectedEndpointIds(newSelected)
-                              }}
-                            />
-                          ))}
+                          {filteredEndpoints.map((endpoint) => {
+                            const isChecked = selectedEndpointIds.has(endpoint.id!)
+                            const canCheck = isChecked || selectedCountForSpec < 5
+
+                            return (
+                              <EndpointCard
+                                key={endpoint.id}
+                                method={endpoint.method}
+                                path={endpoint.path}
+                                name={endpoint.name}
+                                isSelected={endpoint.id === selectedEndpointId}
+                                onClick={() => {
+                                  setSelectedEndpointId(endpoint.id!)
+                                  setSelectedSpecId(spec.id!)
+                                }}
+                                showCheckbox={selectionModeSpecId === spec.id}
+                                isChecked={isChecked}
+                                onCheckboxChange={(checked) => {
+                                  const newSelected = new Set(selectedEndpointIds)
+                                  if (checked) {
+                                    // Only allow checking if under limit
+                                    if (newSelected.size < 5) {
+                                      newSelected.add(endpoint.id!)
+                                    }
+                                  } else {
+                                    newSelected.delete(endpoint.id!)
+                                  }
+                                  setSelectedEndpointIds(newSelected)
+                                }}
+                                disabled={!canCheck && selectionModeSpecId === spec.id}
+                              />
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -864,12 +978,41 @@ export default function SpecsNew() {
                       <p className="text-sm text-gray-600 mt-2">{selectedSpec.description}</p>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleDeleteSpec(selectedSpec.id!, selectedSpec.name)}
-                    className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-50 transition-all"
-                  >
-                    <Trash2 size={20} />
-                  </button>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Edit3}
+                      onClick={() => handleEditSpec(selectedSpec.id!)}
+                      title="Edit spec metadata (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Download}
+                      onClick={() => handleExportSpec(selectedSpec)}
+                      title="Export spec (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Copy}
+                      onClick={() => handleDuplicateSpec(selectedSpec)}
+                      title="Duplicate spec (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={Trash2}
+                      onClick={() => handleDeleteSpec(selectedSpec.id!, selectedSpec.name)}
+                      title="Delete spec"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-sm">

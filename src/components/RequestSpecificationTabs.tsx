@@ -1,12 +1,11 @@
 import {useState} from 'react'
-import {File, Upload, X} from 'lucide-react'
-import VariableInput from './VariableInput'
+import {Minimize2, Maximize2} from 'lucide-react'
 import SchemaRenderer from './SchemaRenderer'
 import FieldEditor, {Field} from './FieldEditor'
 
 interface RequestSpecificationTabsProps {
   endpoint: any
-  mode: 'view' | 'edit'
+  mode: 'view' | 'edit' | 'test'
   // Edit mode props
   headers?: Record<string, string>
   params?: Record<string, string>
@@ -22,6 +21,7 @@ interface RequestSpecificationTabsProps {
   onQueryParamsChange?: (params: Field[]) => void
   onHeaderParamsChange?: (headers: Field[]) => void
   onBodyFieldsChange?: (fields: Field[]) => void
+  onContentTypeChange?: (contentType: string) => void
   // Common props
   selectedEnv?: any
   readOnly?: boolean
@@ -36,14 +36,20 @@ export default function RequestSpecificationTabs({
   endpoint,
   mode,
   headers = {},
+  params = {},
+  body = '',
   formData = {},
   queryParams = [],
   headerParams = [],
   bodyFields = [],
+  onHeadersChange,
+  onParamsChange,
+  onBodyChange,
   onFormDataChange,
   onQueryParamsChange,
   onHeaderParamsChange,
   onBodyFieldsChange,
+  onContentTypeChange,
   selectedEnv,
   readOnly = false,
   initialActiveTab = 'params',
@@ -59,7 +65,13 @@ export default function RequestSpecificationTabs({
   const isEditable = mode === 'edit' && !readOnly
 
   const method = endpoint.method || 'GET'
-  const contentType = mode === 'edit' ? (headers['Content-Type'] || 'application/json') : (endpoint.request?.contentType || 'application/json')
+  const contentType = (mode === 'edit' || mode === 'test') ? (headers['Content-Type'] || 'application/json') : (endpoint.request?.contentType || 'application/json')
+
+  const handleContentTypeChange = (newContentType: string) => {
+    if (onContentTypeChange) {
+      onContentTypeChange(newContentType)
+    }
+  }
 
   return (
     <div>
@@ -118,14 +130,30 @@ export default function RequestSpecificationTabs({
                 title="Query Parameters"
                 emptyMessage="No query parameters"
               />
+            ) : mode === 'test' ? (
+              // Test mode - simple key-value input using FieldEditor
+              <FieldEditor
+                fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []}
+                mode="test"
+                title="Query Parameters"
+                emptyMessage="No query parameters"
+                testValues={params}
+                onTestValuesChange={onParamsChange}
+                selectedEnv={selectedEnv}
+              />
             ) : (
               // Edit mode - editable params using FieldEditor
               <FieldEditor
                 fields={queryParams}
-                onFieldsChange={onQueryParamsChange}
+                onFieldsChange={(fields) => {
+                  // Ensure all fields have in: 'query'
+                  const fieldsWithIn = fields.map(f => ({ ...f, in: 'query' }))
+                  onQueryParamsChange?.(fieldsWithIn)
+                }}
                 mode="edit"
                 title="Query Parameters"
                 emptyMessage="No parameters defined"
+                context="params"
               />
             )}
           </div>
@@ -158,15 +186,55 @@ export default function RequestSpecificationTabs({
                   <p className="text-sm text-gray-500 italic">No headers</p>
                 )}
               </div>
+            ) : mode === 'test' ? (
+              // Test mode - simple key-value input using FieldEditor
+              <div className="space-y-4">
+                {/* Content-Type Display (Read-only in test mode) */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-700">Content-Type:</span>
+                    <code className="text-sm text-purple-600 font-mono">{contentType}</code>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">💡 Change Content-Type in the Body tab</p>
+                </div>
+
+                {/* Headers using FieldEditor */}
+                <FieldEditor
+                  fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'header') || []}
+                  mode="test"
+                  title="Headers"
+                  emptyMessage="No headers"
+                  testValues={headers}
+                  onTestValuesChange={onHeadersChange}
+                  selectedEnv={selectedEnv}
+                />
+              </div>
             ) : (
-              // Edit mode - editable headers using FieldEditor
-              <FieldEditor
-                fields={headerParams}
-                onFieldsChange={onHeaderParamsChange}
-                mode="edit"
-                title="Headers"
-                emptyMessage="No headers defined"
-              />
+              // Edit mode
+              <div className="space-y-4">
+                {/* Content-Type Display (Read-only in edit mode) */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-700">Content-Type:</span>
+                    <code className="text-sm text-purple-600 font-mono">{contentType}</code>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">💡 Change Content-Type in the Body tab</p>
+                </div>
+
+                {/* Editable headers using FieldEditor */}
+                <FieldEditor
+                  fields={headerParams}
+                  onFieldsChange={(fields) => {
+                    // Ensure all fields have in: 'header'
+                    const fieldsWithIn = fields.map(f => ({ ...f, in: 'header' }))
+                    onHeaderParamsChange?.(fieldsWithIn)
+                  }}
+                  mode="edit"
+                  title="Custom Headers"
+                  emptyMessage="No custom headers defined"
+                  context="headers"
+                />
+              </div>
             )}
           </div>
         )}
@@ -207,89 +275,109 @@ export default function RequestSpecificationTabs({
               ) : (
                 <p className="text-sm text-gray-500 italic">No request body</p>
               )
-            ) : (
-              // Edit mode
+            ) : mode === 'test' ? (
+              // Test mode - Show form inputs for filling values
               <div>
-                {contentType.includes('multipart/form-data') ? (
-                  // Form data fields
-                  <div className="space-y-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Form Data</label>
-                    {endpoint.request?.body?.fields && endpoint.request.body.fields.length > 0 ? (
-                      endpoint.request.body.fields.map((field: any) => (
-                        <div key={field.name} className="space-y-1">
-                          <label className="block text-sm font-medium text-gray-700">
-                            {field.name}
-                            {field.type === 'string' && field.format === 'binary' && (
-                              <span className="ml-2 text-xs text-gray-500">(file)</span>
-                            )}
-                          </label>
-                          {field.description && (
-                            <p className="text-xs text-gray-500 mb-1">{field.description}</p>
-                          )}
-                          {(field.type === 'string' && field.format === 'binary') || field.type === 'file' ? (
-                            <div className="space-y-2">
-                              <input
-                                id={`file-upload-${field.name}`}
-                                type="file"
-                                multiple={field.items !== undefined}
-                                onChange={(e) => {
-                                  const files = e.target.files
-                                  if (files && onFormDataChange) {
-                                    if (field.items !== undefined) {
-                                      onFormDataChange({ ...formData, [field.name]: Array.from(files) })
-                                    } else {
-                                      onFormDataChange({ ...formData, [field.name]: files[0] })
-                                    }
-                                  }
-                                }}
-                                disabled={readOnly}
-                                className="hidden"
-                              />
-                              <label
-                                htmlFor={`file-upload-${field.name}`}
-                                className={`flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-colors ${
-                                  readOnly ? 'cursor-not-allowed opacity-50' : ''
-                                }`}
-                              >
-                                <Upload size={20} className="text-gray-600" />
-                                <span className="text-sm text-gray-700">
-                                  {formData[field.name]
-                                    ? (Array.isArray(formData[field.name])
-                                        ? `${formData[field.name].length} file(s) selected`
-                                        : 'Change file')
-                                    : `Choose file${field.items !== undefined ? 's' : ''}`}
-                                </span>
-                              </label>
-                              {formData[field.name] && (typeof formData[field.name] === 'object' && 'name' in formData[field.name]) && (
-                                <div className="flex items-center gap-2 p-2 bg-gray-50 border border-gray-200 rounded">
-                                  <File size={16} className="text-purple-600" />
-                                  <span className="text-sm text-gray-700 flex-1">{formData[field.name].name}</span>
-                                  <span className="text-xs text-gray-500">{(formData[field.name].size / 1024).toFixed(1)} KB</span>
-                                  {isEditable && (
-                                    <button
-                                      onClick={() => onFormDataChange?.({ ...formData, [field.name]: null })}
-                                      className="p-1 text-red-600 hover:bg-red-50 rounded"
-                                    >
-                                      <X size={14} />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <VariableInput
-                              value={formData[field.name] || ''}
-                              onChange={(value) => onFormDataChange?.({ ...formData, [field.name]: value })}
-                              variables={selectedEnv?.variables || {}}
-                              disabled={readOnly}
-                              placeholder={`Enter ${field.name}${field.description ? ` - ${field.description}` : ''}`}
-                            />
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-gray-500">No form fields defined</p>
-                    )}
+                {/* Content-Type Display (Read-only in test mode) */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Content-Type</label>
+                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+                    <code className="text-sm text-purple-600 font-mono">{contentType}</code>
+                  </div>
+                </div>
+
+                {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
+                  // Form data / URL-encoded - Use FieldEditor
+                  <FieldEditor
+                    fields={endpoint.request?.body?.fields || []}
+                    mode="test"
+                    title={contentType.includes('multipart/form-data') ? 'Form Data' : 'URL-Encoded Data'}
+                    emptyMessage="No body fields defined"
+                    testValues={formData}
+                    onTestValuesChange={onFormDataChange}
+                    selectedEnv={selectedEnv}
+                  />
+                ) : endpoint.request?.body ? (
+                  // JSON body - Show textarea for raw JSON editing (only if body is defined)
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-gray-700">Request Body (JSON)</label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            try {
+                              const parsed = JSON.parse(body)
+                              onBodyChange?.(JSON.stringify(parsed, null, 2))
+                            } catch (e) {
+                              // If body is empty or invalid, try to parse example
+                              if (endpoint.request.body.example) {
+                                onBodyChange?.(JSON.stringify(endpoint.request.body.example, null, 2))
+                              }
+                            }
+                          }}
+                          className="px-2 py-1 text-xs text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex items-center gap-1"
+                          title="Beautify JSON"
+                        >
+                          <Maximize2 size={14} />
+                          Beautify
+                        </button>
+                        <button
+                          onClick={() => {
+                            try {
+                              const parsed = JSON.parse(body)
+                              onBodyChange?.(JSON.stringify(parsed))
+                            } catch (e) {
+                              // Ignore invalid JSON
+                            }
+                          }}
+                          className="px-2 py-1 text-xs text-gray-600 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors flex items-center gap-1"
+                          title="Minify JSON"
+                        >
+                          <Minimize2 size={14} />
+                          Minify
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      value={body}
+                      onChange={(e) => onBodyChange?.(e.target.value)}
+                      placeholder={endpoint.request.body.example ? JSON.stringify(endpoint.request.body.example, null, 2) : '{\n  \n}'}
+                      className="w-full h-64 p-3 font-mono text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-50"
+                    />
+                  </div>
+                ) : (
+                  // No body defined
+                  <p className="text-sm text-gray-500 italic">No request body</p>
+                )}
+              </div>
+            ) : (
+              // Edit mode - Use FieldEditor for editing structure
+              <div>
+                {/* Content-Type Selector */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Content-Type</label>
+                  <select
+                    value={contentType}
+                    onChange={(e) => handleContentTypeChange(e.target.value)}
+                    disabled={readOnly}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="application/json">application/json</option>
+                    <option value="multipart/form-data">multipart/form-data</option>
+                    <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+                  </select>
+                </div>
+                {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
+                  // Form data / URL-encoded fields - Use FieldEditor
+                  <div>
+                    <FieldEditor
+                      fields={bodyFields}
+                      onFieldsChange={onBodyFieldsChange}
+                      mode={mode}
+                      title={contentType.includes('multipart/form-data') ? 'Form Data Fields' : 'URL-Encoded Fields'}
+                      emptyMessage="No body fields defined"
+                      context={contentType.includes('multipart/form-data') ? 'body-form' : 'body-urlencoded'}
+                    />
                   </div>
                 ) : (
                   // JSON body - Use FieldEditor for editing structure
@@ -300,6 +388,7 @@ export default function RequestSpecificationTabs({
                       mode={mode}
                       title="Body Fields"
                       emptyMessage="No body fields defined"
+                      context="body-json"
                     />
                   </div>
                 )}

@@ -1,5 +1,5 @@
 import {useState} from 'react'
-import {CheckCircle2, Edit2, Plus, X} from 'lucide-react'
+import {CheckCircle2, Edit2, Plus, X, XCircle, Clock, AlertTriangle, RotateCcw} from 'lucide-react'
 import VariableHighlight from './VariableHighlight'
 import VariableInput from './VariableInput'
 import {hasVariables} from '@/lib/utils/variableSubstitution'
@@ -17,14 +17,39 @@ interface AssertionsSectionProps {
   onAssertionsChange?: (assertions: Assertion[]) => void
   readOnly?: boolean
   selectedEnv?: any
+  results?: any[]
+  hasResponse?: boolean
+  defaultAssertions?: Assertion[]
+  onResetResponse?: () => void
 }
 
 export default function AssertionsSection({
   assertions,
   onAssertionsChange,
   readOnly = false,
-  selectedEnv
+  selectedEnv,
+  results = [],
+  hasResponse = false,
+  defaultAssertions = [],
+  onResetResponse
 }: AssertionsSectionProps) {
+
+  // Calculate overall status
+  const passedCount = results.filter((r: any) => r?.passed).length
+  const totalCount = results.length
+  const allPassed = hasResponse && totalCount > 0 && passedCount === totalCount
+  const someFailed = hasResponse && totalCount > 0 && passedCount < totalCount
+  const allFailed = hasResponse && totalCount > 0 && passedCount === 0
+  const pending = !hasResponse && assertions.length > 0
+
+  // Determine border color
+  const getBorderColor = () => {
+    if (pending) return 'border-orange-300'
+    if (allPassed) return 'border-green-300'
+    if (allFailed) return 'border-red-300'
+    if (someFailed) return 'border-yellow-300'
+    return 'border-gray-200'
+  }
   const [showAssertionForm, setShowAssertionForm] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [newAssertion, setNewAssertion] = useState<Assertion>({
@@ -79,22 +104,66 @@ export default function AssertionsSection({
     })
   }
 
+  const handleResetToDefault = () => {
+    console.log('[AssertionsSection] Reset clicked, defaultAssertions:', defaultAssertions)
+    console.log('[AssertionsSection] Current assertions:', assertions)
+    if (onAssertionsChange) {
+      onAssertionsChange([...defaultAssertions])
+    }
+    // Clear response/results when resetting assertions
+    if (onResetResponse) {
+      onResetResponse()
+    }
+  }
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg">
+    <div className={`bg-white border-2 rounded-lg ${getBorderColor()}`}>
       <div className="border-b border-gray-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <CheckCircle2 size={20} className="text-purple-600" />
+            {pending ? (
+              <Clock size={20} className="text-orange-600" />
+            ) : allPassed ? (
+              <CheckCircle2 size={20} className="text-green-600" />
+            ) : allFailed ? (
+              <XCircle size={20} className="text-red-600" />
+            ) : someFailed ? (
+              <AlertTriangle size={20} className="text-yellow-600" />
+            ) : (
+              <CheckCircle2 size={20} className="text-purple-600" />
+            )}
             Assertions
+            {hasResponse && totalCount > 0 && (
+              <span className={`text-sm px-2 py-0.5 rounded font-medium ${
+                allPassed
+                  ? 'bg-green-100 text-green-700'
+                  : allFailed
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-yellow-100 text-yellow-700'
+              }`}>
+                {passedCount}/{totalCount}
+              </span>
+            )}
           </h3>
           {!readOnly && editingIndex === null && (
-            <button
-              onClick={() => setShowAssertionForm(true)}
-              className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-              title="Add Assertion"
-            >
-              <Plus size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+              {hasResponse && (
+                <button
+                  onClick={handleResetToDefault}
+                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Reset to default assertions"
+                >
+                  <RotateCcw size={18} />
+                </button>
+              )}
+              <button
+                onClick={() => setShowAssertionForm(true)}
+                className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                title="Add Assertion"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -105,6 +174,8 @@ export default function AssertionsSection({
             {assertions.map((assertion, index) => {
               const fieldHasVars = assertion.field && hasVariables(String(assertion.field))
               const expectedHasVars = assertion.expected !== undefined && hasVariables(String(assertion.expected))
+              const result = results[index]
+              const passed = result?.passed
 
               return (
                 <div key={index} className="space-y-1">
@@ -201,8 +272,20 @@ export default function AssertionsSection({
                   ) : (
                     /* Display Mode */
                     <>
-                      <div className="flex items-start gap-3 p-3 bg-gray-50 border border-gray-200 rounded">
-                        <CheckCircle2 size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <div className={`flex items-start gap-3 p-3 border rounded ${
+                        passed === undefined
+                          ? 'bg-gray-50 border-gray-200'
+                          : passed
+                          ? 'bg-green-50 border-green-300'
+                          : 'bg-red-50 border-red-300'
+                      }`}>
+                        {passed === undefined ? (
+                          <div className="w-4 h-4 rounded-full border-2 border-gray-400 flex-shrink-0 mt-0.5" />
+                        ) : passed ? (
+                          <CheckCircle2 size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+                        ) : (
+                          <XCircle size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
+                        )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
@@ -214,12 +297,39 @@ export default function AssertionsSection({
                             {assertion.expected !== undefined && (
                               <code className="text-xs text-purple-600">{JSON.stringify(assertion.expected)}</code>
                             )}
+                            {passed !== undefined && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {passed ? 'Passed' : 'Failed'}
+                              </span>
+                            )}
                           </div>
                           {assertion.field && (
                             <p className="text-xs text-gray-600 font-mono">Field: {assertion.field}</p>
                           )}
                           {assertion.description && (
                             <p className="text-xs text-gray-600 mt-1">{assertion.description}</p>
+                          )}
+                          {/* Show result details */}
+                          {result && (
+                            <div className="mt-2 text-xs space-y-1">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <span className="text-gray-500">Expected:</span>{' '}
+                                  <code className="text-gray-900">{JSON.stringify(result.expected)}</code>
+                                </div>
+                                <div>
+                                  <span className="text-gray-500">Actual:</span>{' '}
+                                  <code className={passed ? 'text-green-700' : 'text-red-700'}>
+                                    {JSON.stringify(result.actual)}
+                                  </code>
+                                </div>
+                              </div>
+                              {!passed && result.error && (
+                                <div className="text-red-700 mt-1">{result.error}</div>
+                              )}
+                            </div>
                           )}
                         </div>
                         {!readOnly && (

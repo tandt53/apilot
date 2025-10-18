@@ -5,6 +5,7 @@ interface ResponseDisplayProps {
   response: any | null
   error: string | null
   responseTime?: number
+  assertions?: any[]
   initialActiveTab?: ResponseTab
   onActiveTabChange?: (tab: ResponseTab) => void
 }
@@ -53,20 +54,12 @@ export default function ResponseDisplay({ response, error, responseTime, initial
 
       {error && (
         <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded p-4 text-red-700">
-          {error}
+          <pre className="whitespace-pre-wrap font-sans text-sm">{error}</pre>
         </div>
       )}
 
       {response && (
         <div>
-          {/* Assertion Summary */}
-          {response.assertionResults && (
-            <div className="bg-gray-50 rounded p-4 mx-4 mb-4">
-              <div className="text-sm font-medium text-gray-700 mb-2">
-                Assertions: {response.assertionResults.filter(Boolean).length} / {response.assertionResults.length} passed
-              </div>
-            </div>
-          )}
 
           {/* Response Tabs */}
           <div className="px-4 mb-4">

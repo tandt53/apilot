@@ -1,16 +1,17 @@
 import {useEffect, useState} from 'react'
-import {Code2, Edit3, FileText, Play} from 'lucide-react'
+import {Code2, Edit3, FileText, Play, Trash2} from 'lucide-react'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import RequestTester, {SessionState} from './RequestTester'
 import ResponseSpecificationEditor from './ResponseSpecificationEditor'
 import SaveCancelButtons from './SaveCancelButtons'
+import Button from './Button'
+import {useUpdateEndpoint, useDeleteEndpoint} from '@/lib/hooks'
 import type {Endpoint} from '@/types/database'
 
 interface EndpointDetailProps {
   endpoint: Endpoint
   specId?: string
   selectedEnv?: any
-  onEndpointUpdate?: () => void
 }
 
 // Helper functions for endpoint session management
@@ -34,7 +35,11 @@ const saveEndpointSession = (specId: string, endpointId: number, mode: 'view' | 
   }
 }
 
-export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpointUpdate }: EndpointDetailProps) {
+export default function EndpointDetail({ endpoint, specId, selectedEnv }: EndpointDetailProps) {
+  // Mutation hooks
+  const updateEndpoint = useUpdateEndpoint()
+  const deleteEndpoint = useDeleteEndpoint()
+
   // Load saved session state
   const savedData = specId && endpoint.id ? loadEndpointSession(specId, endpoint.id) : { mode: 'view' as const }
   const [mode, setMode] = useState<'view' | 'test' | 'edit'>(savedData.mode)
@@ -51,6 +56,7 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpoi
   const [editBodyFields, setEditBodyFields] = useState<any[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
+
   // Reload mode when endpoint changes
   useEffect(() => {
     if (specId && endpoint.id) {
@@ -60,12 +66,12 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpoi
     }
   }, [endpoint.id, specId])
 
+
   // Function to reset edit state from endpoint data
   const resetEditState = () => {
-    // Initialize headers from endpoint
-    const initialHeaders: Record<string, string> = {}
-    if (endpoint.request?.contentType) {
-      initialHeaders['Content-Type'] = endpoint.request.contentType
+    // Initialize headers from endpoint - always include Content-Type
+    const initialHeaders: Record<string, string> = {
+      'Content-Type': endpoint.request?.contentType || 'application/json'
     }
     endpoint.request?.parameters?.filter((p: any) => p.in === 'header').forEach((p: any) => {
       initialHeaders[p.name] = p.example || ''
@@ -110,7 +116,14 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpoi
     if (mode === 'edit') {
       resetEditState()
     }
-  }, [mode, endpoint])
+  }, [mode])  // Only reset when mode changes, not when endpoint changes
+
+  // Reset unsaved changes flag when endpoint prop changes (after successful save)
+  useEffect(() => {
+    if (mode === 'view') {
+      setHasUnsavedChanges(false)
+    }
+  }, [endpoint, mode])
 
   // Save mode when it changes
   useEffect(() => {
@@ -173,17 +186,74 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpoi
           )}
         </div>
 
-        {/* Save/Cancel Buttons - Only show in Edit mode */}
-        {mode === 'edit' && (
-          <SaveCancelButtons
-            onSave={() => {
-              // TODO: Implement save logic
-              setMode('view')
-            }}
-            onCancel={resetEditState}
-            hasUnsavedChanges={hasUnsavedChanges}
-          />
-        )}
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          {/* Save/Cancel Buttons - Only show in Edit mode */}
+          {mode === 'edit' && (
+            <SaveCancelButtons
+              onSave={async () => {
+                if (!endpoint.id) return
+
+                try {
+                  // Build updated request object
+                  const updatedRequest = {
+                    ...endpoint.request,
+                    contentType: editHeaders['Content-Type'] || 'application/json',
+                    parameters: [
+                      ...editQueryParams,
+                      ...editHeaderParams,
+                    ],
+                    body: editBodyFields.length > 0 ? {
+                      ...endpoint.request?.body,
+                      fields: editBodyFields,
+                    } : endpoint.request?.body,
+                  }
+
+                  // Save to database using mutation hook
+                  // mutateAsync waits for onSuccess to complete, which includes refetch
+                  await updateEndpoint.mutateAsync({
+                    id: endpoint.id,
+                    data: {
+                      request: updatedRequest,
+                      responses: editResponses,
+                    }
+                  })
+
+                  // Switch to view mode - cache is now updated
+                  setMode('view')
+                  setHasUnsavedChanges(false)
+                } catch (error) {
+                  console.error('Failed to save endpoint changes:', error)
+                }
+              }}
+              onCancel={resetEditState}
+              hasUnsavedChanges={hasUnsavedChanges}
+            />
+          )}
+
+          {/* Delete Button - Only show in View mode */}
+          {mode === 'view' && endpoint.id && (
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              onClick={async () => {
+                if (!endpoint.id) return
+                const confirmed = window.confirm(
+                  `Are you sure you want to delete endpoint "${endpoint.method} ${endpoint.path}"?`
+                )
+                if (confirmed) {
+                  try {
+                    await deleteEndpoint.mutateAsync(endpoint.id)
+                  } catch (error) {
+                    console.error('Failed to delete endpoint:', error)
+                  }
+                }
+              }}
+              title="Delete endpoint"
+            />
+          )}
+        </div>
       </div>
 
       {/* Mode Toggle */}
@@ -331,6 +401,9 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv, onEndpoi
                 onQueryParamsChange={setEditQueryParams}
                 onHeaderParamsChange={setEditHeaderParams}
                 onBodyFieldsChange={setEditBodyFields}
+                onContentTypeChange={(contentType) => {
+                  setEditHeaders({ ...editHeaders, 'Content-Type': contentType })
+                }}
               />
             </div>
           </div>

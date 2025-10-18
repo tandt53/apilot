@@ -18,10 +18,14 @@ export interface SessionState {
     activeRequestTab: 'headers' | 'params' | 'body' | 'auth'
     activeResponseTab: 'body' | 'headers'
     lastResponse: any | null
+    lastError: string | null
+    lastResponseTime: number
+    lastUrl?: string
     lastRequest: {
         headers: Record<string, string>
         params: Record<string, string>
         body: string
+        formData: Record<string, any>
     } | null
 }
 
@@ -43,6 +47,8 @@ interface RequestTesterProps {
     // Session state props
     initialSession?: Partial<SessionState>
     onSessionChange?: (session: SessionState) => void
+    // Default assertions (for reset button)
+    defaultAssertions?: any[]
 }
 
 export default function RequestTester({
@@ -57,7 +63,8 @@ export default function RequestTester({
                                           selectedEnvId,
                                           onEnvChange,
                                           initialSession,
-                                          onSessionChange
+                                          onSessionChange,
+                                          defaultAssertions
                                       }: RequestTesterProps) {
     // Session state for tabs
     const [activeRequestTab, setActiveRequestTab] = useState<'headers' | 'params' | 'body' | 'auth'>(
@@ -67,6 +74,11 @@ export default function RequestTester({
         initialSession?.activeResponseTab || 'body'
     )
     const [url, setUrl] = useState(() => {
+        // Try to load from session first
+        if (initialSession?.lastUrl) {
+            return initialSession.lastUrl
+        }
+
         const baseUrl = selectedEnv?.baseUrl || 'https://api.example.com'
         let path = endpoint.path
 
@@ -85,6 +97,11 @@ export default function RequestTester({
     const [method] = useState(endpoint.method || 'GET')
 
     const [headers, setHeaders] = useState<Record<string, string>>(() => {
+        // Try to load from session first
+        if (initialSession?.lastRequest?.headers) {
+            return initialSession.lastRequest.headers
+        }
+
         const initialHeaders: Record<string, string> = {}
 
         if (endpoint.request?.contentType) {
@@ -108,6 +125,11 @@ export default function RequestTester({
     })
 
     const [params, setParams] = useState<Record<string, string>>(() => {
+        // Try to load from session first
+        if (initialSession?.lastRequest?.params) {
+            return initialSession.lastRequest.params
+        }
+
         const initialParams: Record<string, string> = {}
 
         if (endpoint.request?.parameters) {
@@ -125,6 +147,11 @@ export default function RequestTester({
     })
 
     const [body, setBody] = useState(() => {
+        // Try to load from session first
+        if (initialSession?.lastRequest?.body) {
+            return initialSession.lastRequest.body
+        }
+
         if (endpoint.request?.body) {
             const contentType = endpoint.request.contentType
 
@@ -149,6 +176,11 @@ export default function RequestTester({
     })
 
     const [formData, setFormData] = useState<Record<string, any>>(() => {
+        // Try to load from session first
+        if (initialSession?.lastRequest?.formData) {
+            return initialSession.lastRequest.formData
+        }
+
         const initialFormData: Record<string, any> = {}
 
         const contentType = endpoint.request?.contentType
@@ -166,6 +198,17 @@ export default function RequestTester({
         return initialFormData
     })
 
+    // Wrap setFormData to also update cache
+    const setFormDataWithCache = (data: Record<string, any> | ((prev: Record<string, any>) => Record<string, any>)) => {
+        setFormData(prevData => {
+            const newData = typeof data === 'function' ? data(prevData) : data
+            if (testCase?.id) {
+                formDataCacheRef.current.set(testCase.id, newData)
+            }
+            return newData
+        })
+    }
+
     const [assertions, setAssertions] = useState<Assertion[]>(() => {
         return endpoint.assertions || []
     })
@@ -178,13 +221,16 @@ export default function RequestTester({
         assertions: endpoint.assertions || []
     })
 
+    // Cache for form data including files (persists across test switches)
+    const formDataCacheRef = useRef<Map<number, Record<string, any>>>(new Map())
+
     const [hasChanges, setHasChanges] = useState(false)
     const [_saving, setSaving] = useState(false)
 
     const [isExecuting, setIsExecuting] = useState(false)
     const [response, setResponse] = useState<any>(initialSession?.lastResponse || null)
-    const [error, setError] = useState<string | null>(null)
-    const [responseTime, setResponseTime] = useState<number>(0)
+    const [error, setError] = useState<string | null>(initialSession?.lastError || null)
+    const [responseTime, setResponseTime] = useState<number>(initialSession?.lastResponseTime || 0)
 
     // Environment info popover state
     const [showEnvInfo, setShowEnvInfo] = useState(false)
@@ -197,19 +243,38 @@ export default function RequestTester({
                 activeRequestTab,
                 activeResponseTab,
                 lastResponse: response,
-                lastRequest: response ? {
+                lastError: error,
+                lastResponseTime: responseTime,
+                lastUrl: url,
+                lastRequest: {
                     headers,
                     params,
-                    body
-                } : null
+                    body,
+                    formData
+                }
             }
+            console.log('[RequestTester] Session state changed, saving:', {
+                hasResponse: !!response,
+                hasError: !!error,
+                responseTime,
+                url,
+                session
+            })
             onSessionChange(session)
         }
-    }, [activeRequestTab, activeResponseTab, response, headers, params, body, onSessionChange])
+    }, [activeRequestTab, activeResponseTab, response, error, responseTime, url, headers, params, body, formData, onSessionChange])
 
     // Reset state when testCase changes (switching between different tests)
     useEffect(() => {
         if (!testCase) return
+
+        // Skip reset if we have a saved session (to preserve user edits)
+        if (initialSession?.lastRequest) {
+            console.log('[RequestTester] Skipping reset - session exists')
+            return
+        }
+
+        console.log('[RequestTester] No session found, initializing from defaults')
 
         // Reset URL
         const baseUrl = selectedEnv?.baseUrl || 'https://api.example.com'
@@ -284,22 +349,29 @@ export default function RequestTester({
         }
         setBody(initialBody)
 
-        // Reset form data from testCase or endpoint
-        const initialFormData: Record<string, any> = {}
-        const contentType = testCase.headers?.['Content-Type'] || endpoint.request?.contentType
-        if ((contentType === 'multipart/form-data' || contentType === 'application/x-www-form-urlencoded')) {
-            if (testCase.body && typeof testCase.body === 'object') {
-                Object.entries(testCase.body).forEach(([key, value]) => {
-                    initialFormData[key] = value
-                })
-            } else if (endpoint.request?.body?.fields) {
-                endpoint.request.body.fields.forEach((field: any) => {
-                    if (field.format === 'binary' || field.type === 'file') {
-                        initialFormData[field.name] = null
-                    } else {
-                        initialFormData[field.name] = field.example || ''
-                    }
-                })
+        // Reset form data - check cache first, then testCase, then endpoint
+        const cachedFormData = testCase.id ? formDataCacheRef.current.get(testCase.id) : null
+        let initialFormData: Record<string, any> = {}
+
+        if (cachedFormData) {
+            // Restore from cache (includes uploaded files)
+            initialFormData = cachedFormData
+        } else {
+            const contentType = testCase.headers?.['Content-Type'] || endpoint.request?.contentType
+            if ((contentType === 'multipart/form-data' || contentType === 'application/x-www-form-urlencoded')) {
+                if (testCase.body && typeof testCase.body === 'object') {
+                    Object.entries(testCase.body).forEach(([key, value]) => {
+                        initialFormData[key] = value
+                    })
+                } else if (endpoint.request?.body?.fields) {
+                    endpoint.request.body.fields.forEach((field: any) => {
+                        if (field.format === 'binary' || field.type === 'file') {
+                            initialFormData[field.name] = null
+                        } else {
+                            initialFormData[field.name] = field.example || ''
+                        }
+                    })
+                }
             }
         }
         setFormData(initialFormData)
@@ -317,12 +389,16 @@ export default function RequestTester({
             assertions: [...initialAssertions]
         }
 
-        // Reset response state
-        setResponse(null)
-        setError(null)
-        setResponseTime(0)
+        // Only reset response state if there's no saved session
+        // This preserves response/error/responseTime when switching between tests
+        if (!initialSession?.lastResponse && !initialSession?.lastError) {
+            setResponse(null)
+            setError(null)
+            setResponseTime(0)
+        }
+
         setHasChanges(false)
-    }, [testCase?.id]) // Only depend on testCase ID, not endpoint (which changes every render)
+    }, [testCase?.id, initialSession]) // Only depend on testCase ID and initialSession
 
     const handleSaveChanges = async () => {
         if (!testCase || !onTestUpdate || !hasChanges) return
@@ -399,12 +475,13 @@ export default function RequestTester({
         setError(null)
         setResponse(null)
 
+        let requestUrl = url // Define outside try block for error handling
+
         try {
             const startTime = Date.now()
 
             const envVariables = selectedEnv?.variables || {}
 
-            let requestUrl = url
             if (Object.keys(envVariables).length > 0) {
                 requestUrl = substituteVariables(requestUrl, envVariables)
             }
@@ -431,14 +508,76 @@ export default function RequestTester({
 
             const finalHeaders = {...substitutedHeaders, ...(selectedEnv?.headers || {})}
 
+            // Log request details for debugging
+            console.group('🚀 API Request')
+            console.log('Method:', method)
+            console.log('URL:', requestUrl)
+            console.log('Headers:', finalHeaders)
+            console.log('Params:', params)
+            if (body) console.log('Body:', body)
+            if (Object.keys(formData).length > 0) console.log('Form Data:', formData)
+            console.groupEnd()
+
             const fetchOptions: RequestInit = {
                 method,
                 headers: finalHeaders,
             }
 
-            if (method !== 'GET' && method !== 'HEAD' && body) {
-                const substitutedBody = substituteVariables(body, envVariables)
-                fetchOptions.body = substitutedBody
+            // Handle body based on content type
+            if (method !== 'GET' && method !== 'HEAD') {
+                const contentType = finalHeaders['Content-Type'] || ''
+
+                if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+                    // Check if any file paths exist (for validation only - actual file reading happens in backend)
+                    const fileFields: string[] = []
+                    const missingFiles: string[] = []
+
+                    if (endpoint.request?.body?.fields) {
+                        for (const field of endpoint.request.body.fields) {
+                            if (field.type === 'file' && formData[field.name]) {
+                                fileFields.push(field.name)
+                                // Validate file path exists (Electron will handle actual reading)
+                                if (window.electron && formData[field.name]) {
+                                    // Note: We'll validate in the IPC handler
+                                    // For now, just mark that we have file paths
+                                }
+                            }
+                        }
+                    }
+
+                    if (missingFiles.length > 0) {
+                        throw new Error(`The following files could not be found:\n${missingFiles.join('\n')}`)
+                    }
+
+                    // Use IPC for multipart/form-data requests with files
+                    if (window.electron && fileFields.length > 0) {
+                        const result = await window.electron.executeTest({
+                            url: requestUrl,
+                            method,
+                            headers: finalHeaders,
+                            formData
+                        })
+
+                        const endTime = Date.now()
+                        setResponseTime(endTime - startTime)
+                        setResponse(result)
+                        return
+                    }
+
+                    // For form data without files or web version, use fetch with FormData
+                    const formDataObj = new FormData()
+                    Object.entries(formData).forEach(([key, value]) => {
+                        if (value !== null && value !== undefined) {
+                            formDataObj.append(key, String(value))
+                        }
+                    })
+                    fetchOptions.body = formDataObj
+                    // Remove Content-Type to let browser set it with boundary
+                    delete finalHeaders['Content-Type']
+                } else if (body) {
+                    const substitutedBody = substituteVariables(body, envVariables)
+                    fetchOptions.body = substitutedBody
+                }
             }
 
             const res = await fetch(requestUrl, fetchOptions)
@@ -461,31 +600,95 @@ export default function RequestTester({
                 data: responseData,
             }
 
+            // Log response details for debugging
+            console.group('✅ API Response')
+            console.log('Status:', res.status, res.statusText)
+            console.log('Response Time:', endTime - startTime, 'ms')
+            console.log('Headers:', responseObj.headers)
+            console.log('Data:', responseData)
+            console.groupEnd()
+
             setResponse(responseObj)
 
             if (assertions.length > 0) {
+                // Normalize assertion type to handle both old and new formats
+                const normalizeAssertionType = (type: string): string => {
+                    const typeMap: Record<string, string> = {
+                        'status-code': 'status',
+                        'json-path': 'body',
+                        'response-header': 'header'
+                    }
+                    return typeMap[type] || type
+                }
+
                 const results = assertions.map((assertion) => {
                     try {
-                        if (assertion.type === 'status') {
-                            const actual = res.status
-                            return evaluateAssertion(actual, assertion.operator, assertion.expected)
-                        } else if (assertion.type === 'body') {
-                            const actual = getNestedValue(responseData, assertion.field)
-                            return evaluateAssertion(actual, assertion.operator, assertion.expected)
-                        } else if (assertion.type === 'header') {
-                            const actual = res.headers.get(assertion.field)
-                            return evaluateAssertion(actual, assertion.operator, assertion.expected)
+                        let actual: any
+                        let passed: boolean
+                        const normalizedType = normalizeAssertionType(assertion.type)
+
+                        if (normalizedType === 'status') {
+                            actual = res.status
+                            passed = evaluateAssertion(actual, assertion.operator, assertion.expected)
+                        } else if (normalizedType === 'body') {
+                            actual = getNestedValue(responseData, assertion.field)
+                            passed = evaluateAssertion(actual, assertion.operator, assertion.expected)
+                        } else if (normalizedType === 'header') {
+                            actual = res.headers.get(assertion.field)
+                            passed = evaluateAssertion(actual, assertion.operator, assertion.expected)
+                        } else {
+                            return {
+                                passed: false,
+                                expected: assertion.expected,
+                                actual: undefined,
+                                error: 'Unknown assertion type'
+                            }
                         }
-                    } catch (e) {
-                        return false
+
+                        return {
+                            passed,
+                            expected: assertion.expected,
+                            actual,
+                            error: passed ? null : `Expected ${assertion.operator} ${assertion.expected}, got ${actual}`
+                        }
+                    } catch (e: any) {
+                        return {
+                            passed: false,
+                            expected: assertion.expected,
+                            actual: undefined,
+                            error: e.message || 'Assertion evaluation failed'
+                        }
                     }
-                    return false
                 })
 
                 setResponse({...responseObj, assertionResults: results})
             }
         } catch (err: any) {
-            setError(err.message || 'Request failed')
+            // Log error details for debugging
+            console.group('❌ API Request Failed')
+            console.log('Error:', err.message)
+            console.log('URL:', requestUrl)
+            console.log('Method:', method)
+            console.groupEnd()
+
+            // Provide more meaningful error messages
+            let errorMessage = 'Request failed'
+
+            if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                errorMessage = `Network Error: Unable to connect to ${requestUrl}\n\nPossible causes:\n• The server is not running or unreachable\n• Invalid domain name (e.g., api.example.com is not a real domain)\n• CORS policy blocking the request\n• No internet connection`
+            } else if (err.message.includes('ERR_NAME_NOT_RESOLVED')) {
+                errorMessage = `DNS Resolution Failed: Cannot resolve hostname\n\nThe domain "${new URL(requestUrl).hostname}" does not exist or cannot be found.\n\nSuggestions:\n• Check if the URL is correct\n• Use a real API endpoint instead of example URLs\n• Configure an environment with the correct base URL`
+            } else if (err.message.includes('CORS')) {
+                errorMessage = `CORS Error: Cross-Origin Request Blocked\n\nThe server at ${requestUrl} does not allow requests from this origin.\n\nSolutions:\n• Enable CORS on the server\n• Use a proxy or backend service\n• Test with a CORS-enabled API`
+            } else if (err.message.includes('timeout')) {
+                errorMessage = `Request Timeout: The server took too long to respond\n\nThe request to ${requestUrl} exceeded the timeout limit.\n\nSuggestions:\n• Check if the server is slow or overloaded\n• Verify the endpoint exists and is working\n• Increase timeout settings if needed`
+            } else if (err.name === 'AbortError') {
+                errorMessage = `Request Aborted: The request was cancelled`
+            } else {
+                errorMessage = `Error: ${err.message}\n\nRequest URL: ${requestUrl}`
+            }
+
+            setError(errorMessage)
         } finally {
             setIsExecuting(false)
         }
@@ -531,7 +734,7 @@ export default function RequestTester({
                             Request Specification
                         </h3>
                         {/* Environment Selector */}
-                        {environments && environments.length > 0 && onEnvChange && (
+                        {environments && onEnvChange && (
                             <div className="flex items-center gap-2">
                                 <label className="text-sm font-medium text-gray-700">Environment:</label>
                                 <select
@@ -540,22 +743,20 @@ export default function RequestTester({
                                     className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                                 >
                                     <option value="">None (default)</option>
-                                    {environments.map((env) => (
+                                    {environments?.map((env) => (
                                         <option key={env.id} value={env.id}>
                                             {env.name}
                                         </option>
                                     ))}
                                 </select>
-                                {selectedEnvId && (
-                                    <button
-                                        ref={envInfoButtonRef}
-                                        onClick={() => setShowEnvInfo(!showEnvInfo)}
-                                        className="p-1 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                        title="Environment Details"
-                                    >
-                                        <Info size={16}/>
-                                    </button>
-                                )}
+                                <button
+                                    ref={envInfoButtonRef}
+                                    onClick={() => setShowEnvInfo(!showEnvInfo)}
+                                    className="p-1 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                    title={selectedEnvId ? "Environment Details" : "Manage Environments"}
+                                >
+                                    <Info size={16}/>
+                                </button>
                             </div>
                         )}
                     </div>
@@ -593,7 +794,7 @@ export default function RequestTester({
                     {/* Request Specification Tabs */}
                     <RequestSpecificationTabs
                         endpoint={endpoint}
-                        mode="edit"
+                        mode="test"
                         headers={headers}
                         params={params}
                         body={body}
@@ -601,7 +802,10 @@ export default function RequestTester({
                         onHeadersChange={setHeaders}
                         onParamsChange={setParams}
                         onBodyChange={setBody}
-                        onFormDataChange={setFormData}
+                        onFormDataChange={setFormDataWithCache}
+                        onContentTypeChange={(contentType) => {
+                            setHeaders({ ...headers, 'Content-Type': contentType })
+                        }}
                         selectedEnv={selectedEnv}
                         readOnly={readOnly}
                         initialActiveTab={activeRequestTab}
@@ -615,6 +819,7 @@ export default function RequestTester({
                 response={response}
                 error={error}
                 responseTime={responseTime}
+                assertions={assertions}
                 initialActiveTab={activeResponseTab}
                 onActiveTabChange={setActiveResponseTab}
             />
@@ -625,6 +830,14 @@ export default function RequestTester({
                 onAssertionsChange={setAssertions}
                 readOnly={readOnly}
                 selectedEnv={selectedEnv}
+                results={response?.assertionResults || []}
+                hasResponse={!!response}
+                defaultAssertions={defaultAssertions || endpoint.assertions || []}
+                onResetResponse={() => {
+                    setResponse(null)
+                    setError(null)
+                    setResponseTime(0)
+                }}
             />
 
             {/* Environment Info Popover */}
