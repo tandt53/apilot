@@ -707,7 +707,7 @@ export default function Tests() {
                         endpoints: endpointsToGenerate,
                         spec: parsedSpec,
                         previousMetadata,
-                        onTestGenerated: async (test) => {
+                        onTestGenerated: async (test: any) => {
                           await createTestCase(test as any)
                           refetch()
                         },
@@ -726,7 +726,7 @@ export default function Tests() {
 
                         console.log('[Tests] 💾 SAVED metadata to localStorage:', {
                           completeParsedTests: result.metadata.completeParsedTests.length,
-                          tests: result.metadata.completeParsedTests.map(t => t.name),
+                          tests: result.metadata.completeParsedTests.map((t: any) => t.name),
                           raw: JSON.stringify(result.metadata).substring(0, 200)
                         })
                       } else {
