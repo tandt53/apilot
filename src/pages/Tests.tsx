@@ -619,8 +619,7 @@ export default function Tests() {
                     localStorage.removeItem('tests-remaining-endpoint-ids')
                     localStorage.removeItem('tests-completed-count')
                     localStorage.removeItem('tests-total-count')
-                    localStorage.removeItem('tests-conversation-messages')
-                    localStorage.removeItem('tests-generated-summary')
+                    localStorage.removeItem('tests-generation-metadata')
                     localStorage.removeItem('tests-generating-spec-id')
                   }}
                   className="px-3 py-1 text-xs bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all flex-shrink-0"
@@ -631,7 +630,7 @@ export default function Tests() {
                   onClick={async () => {
                     try {
                       // Import necessary modules
-                      const { getCurrentAIService } = await import('@/lib/ai')
+                      const { generateTestsViaIPC } = await import('@/lib/ai/client')
                       const { getEndpointsBySpec, createTestCase } = await import('@/lib/api')
 
                       // Set generating state
@@ -685,22 +684,29 @@ export default function Tests() {
                         }
                       }
 
-                      // Get AI service
-                      const aiService = await getCurrentAIService()
+                      // Get metadata for continuation
+                      const previousMetadataStr = localStorage.getItem('tests-generation-metadata')
 
-                      // Get conversation history for continuation
-                      const previousMessagesStr = localStorage.getItem('tests-conversation-messages')
-                      const previousSummary = localStorage.getItem('tests-generated-summary')
-                      const previousMessages = previousMessagesStr ? JSON.parse(previousMessagesStr) : undefined
+                      console.log('[Tests] 📥 LOADING metadata from localStorage:', {
+                        exists: !!previousMetadataStr,
+                        length: previousMetadataStr?.length,
+                        preview: previousMetadataStr?.substring(0, 200)
+                      })
 
-                      console.log('[Tests] Continuing with history:', previousMessages ? 'Yes' : 'No')
+                      const previousMetadata = previousMetadataStr ? JSON.parse(previousMetadataStr) : undefined
 
-                      // Generate tests for remaining endpoints with conversation history
-                      const result = await aiService.generateTests({
+                      console.log('[Tests] 📊 PARSED metadata:', {
+                        completeParsedTests: previousMetadata?.completeParsedTests?.length || 0,
+                        tests: previousMetadata?.completeParsedTests?.map((t: any) => t.name) || []
+                      })
+
+                      console.log('[Tests] Continuing generation for', endpointsToGenerate.length, 'endpoints')
+
+                      // Generate tests via IPC (secure main process execution)
+                      const result = await generateTestsViaIPC({
                         endpoints: endpointsToGenerate,
                         spec: parsedSpec,
-                        previousMessages,
-                        generatedTestsSummary: previousSummary || undefined,
+                        previousMetadata,
                         onTestGenerated: async (test) => {
                           await createTestCase(test as any)
                           refetch()
@@ -710,14 +716,19 @@ export default function Tests() {
                       // Handle result
                       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {
                         console.log('[Tests] Token limit reached again')
-                        // Update state for another continuation, including conversation
+                        // Update state for another continuation
                         localStorage.setItem('tests-token-limit-reached', 'true')
                         localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(result.remainingEndpointIds))
                         localStorage.setItem('tests-completed-count', String(result.completedEndpointIds.length))
                         localStorage.setItem('tests-total-count', String(result.remainingEndpointIds.length))
-                        localStorage.setItem('tests-conversation-messages', JSON.stringify(result.conversationMessages))
-                        localStorage.setItem('tests-generated-summary', result.generatedTestsSummary)
+                        localStorage.setItem('tests-generation-metadata', JSON.stringify(result.metadata))
                         localStorage.removeItem('tests-generating')
+
+                        console.log('[Tests] 💾 SAVED metadata to localStorage:', {
+                          completeParsedTests: result.metadata.completeParsedTests.length,
+                          tests: result.metadata.completeParsedTests.map(t => t.name),
+                          raw: JSON.stringify(result.metadata).substring(0, 200)
+                        })
                       } else {
                         // All done - clear everything including conversation
                         console.log('[Tests] All tests generated successfully')
@@ -728,7 +739,7 @@ export default function Tests() {
                         localStorage.removeItem('tests-completed-count')
                         localStorage.removeItem('tests-total-count')
                         localStorage.removeItem('tests-conversation-messages')
-                        localStorage.removeItem('tests-generated-summary')
+                        localStorage.removeItem('tests-generation-metadata')
                         setTokenLimitReached(false)
                       }
                     } catch (error: any) {
@@ -1081,7 +1092,6 @@ export default function Tests() {
                         }
                       }}
                       hasUnsavedChanges={hasUnsavedChanges}
-                      compact={true}
                       saveOnly={true}
                       saveLabel="Save changes"
                     />

@@ -30,7 +30,7 @@
       "@/types/*": ["./src/types/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "electron"],
   "exclude": ["node_modules", "dist", "dist-electron", "release", "**/*.test.ts", "**/*.test.tsx"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

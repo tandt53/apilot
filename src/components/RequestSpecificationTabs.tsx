@@ -62,9 +62,6 @@ export default function RequestSpecificationTabs({
     onActiveTabChange?.(tab)
   }
 
-  const isEditable = mode === 'edit' && !readOnly
-
-  const method = endpoint.method || 'GET'
   const contentType = (mode === 'edit' || mode === 'test') ? (headers['Content-Type'] || 'application/json') : (endpoint.request?.contentType || 'application/json')
 
   const handleContentTypeChange = (newContentType: string) => {

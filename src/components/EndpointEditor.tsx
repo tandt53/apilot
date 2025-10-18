@@ -12,14 +12,11 @@ interface EndpointEditorProps {
   renderButtons?: (props: { onSave: () => void; onCancel: () => void; isSaving: boolean; hasUnsavedChanges: boolean }) => React.ReactNode
 }
 
-export default function EndpointEditor({endpoint, onSave, onCancel, renderButtons}: EndpointEditorProps) {
+export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEditorProps) {
   // Tab state
   const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body' | 'auth'>('params')
 
-  // Form state (method, path, operationId are read-only)
-  const method = endpoint.method
-  const path = endpoint.path
-  const operationId = endpoint.operationId || ''
+  // Form state (method, path, operationId are read-only from endpoint)
   const [name, setName] = useState(endpoint.name || '')
   const [description, setDescription] = useState(endpoint.description || '')
   const [parameters, setParameters] = useState(endpoint.request?.parameters || [])
@@ -68,15 +65,7 @@ export default function EndpointEditor({endpoint, onSave, onCancel, renderButton
     setHasUnsavedChanges(changed)
   }, [name, description, contentType, bodyExample, parameters, bodyFields, endpoint])
 
-  // Handlers - useEffect above will automatically detect changes
-  const handleNameChange = (value: string) => {
-    setName(value)
-  }
-
-  const handleDescriptionChange = (value: string) => {
-    setDescription(value)
-  }
-
+  // Handlers for parameter changes
   const handleQueryParamsChange = (newParams: any[]) => {
     const updated = [...headerParams, ...pathParams, ...cookieParams, ...newParams]
     setParameters(updated)
@@ -159,18 +148,6 @@ export default function EndpointEditor({endpoint, onSave, onCancel, renderButton
       }
     }
     onCancel()
-  }
-
-  // Helper to get method color
-  const getMethodColor = (m: string) => {
-    const colors: Record<string, string> = {
-      GET: 'bg-green-100 text-green-700 border-green-300',
-      POST: 'bg-blue-100 text-blue-700 border-blue-300',
-      PUT: 'bg-orange-100 text-orange-700 border-orange-300',
-      DELETE: 'bg-red-100 text-red-700 border-red-300',
-      PATCH: 'bg-purple-100 text-purple-700 border-purple-300',
-    }
-    return colors[m] || 'bg-gray-100 text-gray-700 border-gray-300'
   }
 
   return (

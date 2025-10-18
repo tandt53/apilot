@@ -5,13 +5,12 @@ import RequestTester, {SessionState} from './RequestTester'
 import ResponseSpecificationEditor from './ResponseSpecificationEditor'
 import SaveCancelButtons from './SaveCancelButtons'
 import Button from './Button'
-import {useUpdateEndpoint, useDeleteEndpoint} from '@/lib/hooks'
+import {useUpdateEndpoint, useDeleteEndpoint, useEnvironments} from '@/lib/hooks'
 import type {Endpoint} from '@/types/database'
 
 interface EndpointDetailProps {
   endpoint: Endpoint
   specId?: string
-  selectedEnv?: any
 }
 
 // Helper functions for endpoint session management
@@ -35,7 +34,7 @@ const saveEndpointSession = (specId: string, endpointId: number, mode: 'view' | 
   }
 }
 
-export default function EndpointDetail({ endpoint, specId, selectedEnv }: EndpointDetailProps) {
+export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps) {
   // Mutation hooks
   const updateEndpoint = useUpdateEndpoint()
   const deleteEndpoint = useDeleteEndpoint()
@@ -56,6 +55,38 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
   const [editBodyFields, setEditBodyFields] = useState<any[]>([])
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
+  // Load environments for this spec
+  const { data: environments } = useEnvironments(specId ? parseInt(specId) : 0)
+
+  // Global environment selection (per spec)
+  const [selectedEnvId, setSelectedEnvId] = useState<string | null>(() => {
+    if (specId) {
+      return localStorage.getItem(`spec-${specId}-selected-env`) || null
+    }
+    return null
+  })
+
+  // Update selected env when spec changes
+  useEffect(() => {
+    if (specId) {
+      const saved = localStorage.getItem(`spec-${specId}-selected-env`)
+      setSelectedEnvId(saved || null)
+    }
+  }, [specId])
+
+  // Save selected environment
+  useEffect(() => {
+    if (specId) {
+      if (selectedEnvId) {
+        localStorage.setItem(`spec-${specId}-selected-env`, selectedEnvId)
+      } else {
+        localStorage.removeItem(`spec-${specId}-selected-env`)
+      }
+    }
+  }, [selectedEnvId, specId])
+
+  // Calculate selectedEnv from environments array
+  const selectedEnvFromId = environments?.find(env => env.id === selectedEnvId)
 
   // Reload mode when endpoint changes
   useEffect(() => {
@@ -204,7 +235,8 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
                       ...editHeaderParams,
                     ],
                     body: editBodyFields.length > 0 ? {
-                      ...endpoint.request?.body,
+                      required: endpoint.request?.body?.required ?? true,
+                      example: endpoint.request?.body?.example,
                       fields: editBodyFields,
                     } : endpoint.request?.body,
                   }
@@ -322,7 +354,7 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
               <RequestSpecificationTabs
                 endpoint={endpoint}
                 mode="view"
-                selectedEnv={selectedEnv}
+                selectedEnv={selectedEnvFromId}
               />
             </div>
           </div>
@@ -351,7 +383,10 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
         <RequestTester
           endpoint={endpoint}
           specId={specId}
-          selectedEnv={selectedEnv}
+          selectedEnv={selectedEnvFromId}
+          environments={environments}
+          selectedEnvId={selectedEnvId}
+          onEnvChange={setSelectedEnvId}
           initialSession={testSession}
           onSessionChange={setTestSession}
         />
@@ -386,7 +421,7 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
               <RequestSpecificationTabs
                 endpoint={endpoint}
                 mode="edit"
-                selectedEnv={selectedEnv}
+                selectedEnv={selectedEnvFromId}
                 headers={editHeaders}
                 params={editParams}
                 body={editBody}

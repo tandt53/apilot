@@ -20,7 +20,7 @@ export default defineConfig({
             rollupOptions: {
               external: ['electron', 'path', 'fs', 'fs/promises'],
               output: {
-                format: 'cjs',
+                format: 'es',
                 entryFileNames: 'main.js'
               }
             }

@@ -3,7 +3,7 @@
  */
 
 import {Ollama} from 'ollama'
-import type {TestCase} from '@/types/database'
+import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type TestConnectionResult} from './base'
 import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
 
@@ -94,8 +94,15 @@ export class OllamaService extends AIService {
         completed: true,
         completedEndpointIds: [],
         remainingEndpointIds: [],
-        conversationMessages: [],
-        generatedTestsSummary: ''
+        metadata: {
+          attemptedEndpointIds: [],
+          successfulEndpointIds: [],
+          partialEndpointIds: [],
+          completeParsedTests: [],
+          partialParsedTests: [],
+          rawResponseLength: 0,
+          tokenLimitReached: false
+        }
       }
     }
 
@@ -134,7 +141,8 @@ export class OllamaService extends AIService {
         fullResponse += content
 
         // Try to extract JSON blocks as they arrive
-        const jsonBlocks = this.extractJsonBlocks(fullResponse)
+        const { complete: jsonBlocks } = this.extractJsonBlocks(fullResponse)
+        // Only process complete blocks during streaming
 
         // If we have new blocks, process them
         if (jsonBlocks.length > lastJsonBlockCount) {
@@ -185,9 +193,19 @@ export class OllamaService extends AIService {
 
       console.log('[Ollama Service] Full response preview:', fullResponse.substring(0, 500))
 
-      // Final extraction to catch any remaining blocks
-      const finalBlocks = this.extractJsonBlocks(fullResponse)
-      console.log('[Ollama Service] Final extraction found', finalBlocks.length, 'total blocks')
+      // Final extraction to catch any remaining blocks and partial tests
+      const { complete: finalBlocks, partial: partialBlocks } = this.extractJsonBlocks(fullResponse)
+      console.log('[Ollama Service] Final extraction found', finalBlocks.length, 'complete blocks')
+
+      // Track partial tests (corrupted JSON)
+      const partialParsedTests: import('./base').ParsedTestInfo[] = []
+      if (partialBlocks.length > 0) {
+        console.log('[Ollama] ⚠️  Detected', partialBlocks.length, 'partial/corrupted tests')
+        for (const partial of partialBlocks) {
+          partialParsedTests.push(partial)
+          console.warn('[Ollama] ⚠️  Partial test:', partial.name || 'Unknown', `(${partial.method || '?'} ${partial.path || '?'})`)
+        }
+      }
 
       for (let i = lastJsonBlockCount; i < finalBlocks.length; i++) {
         const block = finalBlocks[i]
@@ -219,13 +237,39 @@ export class OllamaService extends AIService {
 
       // Return complete result
       const completedEndpointIds = endpoints.map(e => e.id!).filter(Boolean)
+
+      // Note: Ollama SDK doesn't expose done_reason in streaming, so we can't detect token limits
+      // For now, always treat as completed. TODO: Add token limit detection
+      const tokenLimitReached = false
+
+      // If token limit reached, keep all attempted endpoints in remaining list for next iteration
+      const remainingEndpointIds = tokenLimitReached
+        ? endpoints.map(e => e.id!).filter(id => id !== undefined)
+        : []
+
+      const completed = !tokenLimitReached && remainingEndpointIds.length === 0
+
       return {
         tests,
-        completed: true,
+        completed,
         completedEndpointIds,
-        remainingEndpointIds: [],
-        conversationMessages: [],
-        generatedTestsSummary: ''
+        remainingEndpointIds,
+        metadata: {
+          attemptedEndpointIds: completedEndpointIds,
+          successfulEndpointIds: completedEndpointIds,
+          partialEndpointIds: [],
+          completeParsedTests: tests.map(t => ({
+            name: t.name || 'Untitled',
+            testType: t.testType || 'single',
+            method: t.method,
+            path: t.path,
+            endpointId: t.currentEndpointId,
+            status: 'complete' as const
+          })),
+          partialParsedTests,
+          rawResponseLength: fullResponse.length,
+          tokenLimitReached
+        }
       }
     } catch (error: any) {
       console.error('[Ollama Service] Generation error:', error)

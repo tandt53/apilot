@@ -276,7 +276,7 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
             <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">
               {field.items.type}
             </span>
-            {field.items.type === 'file' || field.items.format === 'binary' && (
+            {field.items.type === 'file' && (
               <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded flex items-center gap-1">
                 <Upload size={12} /> multiple file upload
               </span>
