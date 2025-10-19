@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {useQuery, useQueryClient} from '@tanstack/react-query'
 import {useEnvironments, useSpecs} from '@/lib/hooks'
-import {Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
+import {AlertCircle, Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
 import * as api from '@/lib/api'
 import EndpointDetail from '@/components/EndpointDetail'
 import EnvironmentManager from '@/components/EnvironmentManager'
@@ -946,24 +946,28 @@ export default function SpecsNew() {
 
                       {/* Partial Generation Warning - shown when token limit reached */}
                       {isExpanded && showContinueButton && partialGenerationMessage && spec.id === selectedSpecId && (
-                        <div className="ml-2 mt-2 mb-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg space-y-2">
-                          <p className="text-xs text-yellow-800">{partialGenerationMessage}</p>
-                          <button
-                            onClick={handleContinueGeneration}
-                            disabled={isGenerating}
-                            className="w-full px-3 py-1.5 text-xs bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1"
-                          >
-                            {isGenerating ? (
-                              <>
-                                <span className="animate-spin">⏳</span>
-                                Continuing...
-                              </>
-                            ) : (
-                              <>
-                                Continue Generation
-                              </>
-                            )}
-                          </button>
+                        <div className="ml-2 mt-2 mb-2 p-4 bg-orange-50 border border-orange-200 rounded-lg border-l-4 border-l-orange-500">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle size={20} className="text-orange-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-sm font-semibold text-orange-900 mb-1">Generation Paused</h3>
+                              <p className="text-sm text-orange-700 mb-3">{partialGenerationMessage}</p>
+                              <button
+                                onClick={handleContinueGeneration}
+                                disabled={isGenerating}
+                                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center justify-center gap-2"
+                              >
+                                {isGenerating ? (
+                                  <>
+                                    <span className="animate-spin">⏳</span>
+                                    Continuing...
+                                  </>
+                                ) : (
+                                  'Continue Generation'
+                                )}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
 

@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.removeAllListeners('generate-tests-test-generated')
   },
 
+  cancelGeneration: () => ipcRenderer.invoke('cancel-generation'),
+
   // Test operations
   executeTest: (testCase: any) =>
     ipcRenderer.invoke('execute-test', testCase),
@@ -59,6 +61,7 @@ declare global {
       onGenerateTestsProgress: (callback: (progress: any) => void) => void
       onGenerateTestsTestGenerated: (callback: (test: any) => void) => void
       removeGenerateTestsListeners: () => void
+      cancelGeneration: () => Promise<{ success: boolean; message: string }>
       executeTest: (testCase: any) => Promise<any>
       platform: string
       getVersion: () => Promise<string>

@@ -585,10 +585,23 @@ export default function Tests() {
                   <p className="text-xs text-blue-700">Auto-refreshing...</p>
                 </div>
                 <button
-                  onClick={() => {
-                    setIsGenerating(false)
-                    searchParams.delete('generating')
-                    setSearchParams(searchParams)
+                  onClick={async () => {
+                    console.log('[Tests] Stop button clicked - cancelling generation')
+                    try {
+                      const result = await (window as any).electron.cancelGeneration()
+                      console.log('[Tests] Cancel result:', result)
+                      setIsGenerating(false)
+                      searchParams.delete('generating')
+                      setSearchParams(searchParams)
+                      localStorage.removeItem('tests-generating')
+                      localStorage.removeItem('tests-generating-spec-id')
+                    } catch (error) {
+                      console.error('[Tests] Failed to cancel generation:', error)
+                      // Still update UI even if cancel fails
+                      setIsGenerating(false)
+                      searchParams.delete('generating')
+                      setSearchParams(searchParams)
+                    }
                   }}
                   className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex-shrink-0"
                 >
@@ -599,33 +612,34 @@ export default function Tests() {
 
             {/* Token Limit Banner with Continue/Stop Buttons */}
             {tokenLimitReached && !isGenerating && (
-              <div className="m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0 border-l-4 border-orange-500">
-                <AlertCircle size={18} className="text-orange-600 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-orange-900">Generation Paused</h3>
-                  <p className="text-xs text-orange-700">
-                    The AI reached its response limit. Would you like to continue generating more tests?
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    // Stop generation - clear all state and hide banner
-                    console.log('[Tests] User stopped generation')
-                    setTokenLimitReached(false)
-                    setRemainingEndpointIds([])
-                    setCompletedCount(0)
-                    setTotalCount(0)
-                    localStorage.removeItem('tests-token-limit-reached')
-                    localStorage.removeItem('tests-remaining-endpoint-ids')
-                    localStorage.removeItem('tests-completed-count')
-                    localStorage.removeItem('tests-total-count')
-                    localStorage.removeItem('tests-generation-metadata')
-                    localStorage.removeItem('tests-generating-spec-id')
-                  }}
-                  className="px-3 py-1 text-xs bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all flex-shrink-0"
-                >
-                  Stop
-                </button>
+              <div className="m-4 mb-2 p-4 glass-card rounded-2xl border-l-4 border-orange-500">
+                <div className="flex items-start gap-3">
+                  <AlertCircle size={20} className="text-orange-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold text-orange-900 mb-1">Generation Paused</h3>
+                    <p className="text-sm text-orange-700 mb-3">
+                      The AI reached its response limit. Would you like to continue generating more tests?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          // Stop generation - clear all state and hide banner
+                          console.log('[Tests] User stopped generation')
+                          setTokenLimitReached(false)
+                          setRemainingEndpointIds([])
+                          setCompletedCount(0)
+                          setTotalCount(0)
+                          localStorage.removeItem('tests-token-limit-reached')
+                          localStorage.removeItem('tests-remaining-endpoint-ids')
+                          localStorage.removeItem('tests-completed-count')
+                          localStorage.removeItem('tests-total-count')
+                          localStorage.removeItem('tests-generation-metadata')
+                          localStorage.removeItem('tests-generating-spec-id')
+                        }}
+                        className="px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all"
+                      >
+                        Stop
+                      </button>
                 <button
                   onClick={async () => {
                     try {
@@ -752,10 +766,13 @@ export default function Tests() {
                       setSearchParams(searchParams)
                     }
                   }}
-                  className="px-3 py-1 text-xs bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-all flex-shrink-0"
+                  className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-all font-medium"
                 >
-                  Continue Generation
+                  Continue
                 </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

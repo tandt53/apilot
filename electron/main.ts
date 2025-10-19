@@ -24,6 +24,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 let mainWindow: BrowserWindow | null = null
 
+// Abort controller for cancelling ongoing test generation
+let currentGenerationAbortController: AbortController | null = null
+
 function createWindow() {
   // Set icon path based on platform and environment
   let iconPath
@@ -203,6 +206,10 @@ ipcMain.handle('generate-tests', async (event, provider, config, options) => {
       })
     }
 
+    // Create abort controller for this generation session
+    currentGenerationAbortController = new AbortController()
+    console.log('[Main] Created new abort controller for generation')
+
     // Create AI service instance based on provider
     let service
 
@@ -218,11 +225,12 @@ ipcMain.handle('generate-tests', async (event, provider, config, options) => {
       throw new Error(`Unsupported provider: ${provider}`)
     }
 
-    // Generate tests using the service
+    // Generate tests using the service with abort signal
     const result = await service.generateTests({
       endpoints,
       spec,
       previousMetadata,
+      signal: currentGenerationAbortController.signal,
       onProgress: (progress) => {
         event.sender.send('generate-tests-progress', progress)
       },
@@ -270,5 +278,23 @@ ipcMain.handle('generate-tests', async (event, provider, config, options) => {
 
     // Re-throw with original message if no specific handling
     throw error
+  } finally {
+    // Clean up abort controller
+    currentGenerationAbortController = null
+    console.log('[Main] Cleaned up abort controller')
+  }
+})
+
+// Cancel ongoing test generation
+ipcMain.handle('cancel-generation', async () => {
+  console.log('[Main] Cancellation requested')
+  if (currentGenerationAbortController) {
+    console.log('[Main] Aborting ongoing generation...')
+    currentGenerationAbortController.abort()
+    currentGenerationAbortController = null
+    return { success: true, message: 'Generation cancelled' }
+  } else {
+    console.log('[Main] No ongoing generation to cancel')
+    return { success: false, message: 'No ongoing generation' }
   }
 })
