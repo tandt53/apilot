@@ -1,20 +1,23 @@
 import {useEffect, useState} from 'react'
-import {Code2, FileText, Play} from 'lucide-react'
+import {Code2, Edit3, FileText, Play, Trash2} from 'lucide-react'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import RequestTester, {SessionState} from './RequestTester'
+import ResponseSpecificationEditor from './ResponseSpecificationEditor'
+import SaveCancelButtons from './SaveCancelButtons'
+import Button from './Button'
+import {useUpdateEndpoint, useDeleteEndpoint, useEnvironments} from '@/lib/hooks'
 import type {Endpoint} from '@/types/database'
 
 interface EndpointDetailProps {
   endpoint: Endpoint
   specId?: string
-  selectedEnv?: any
 }
 
 // Helper functions for endpoint session management
 const getEndpointSessionKey = (specId: string, endpointId: number) =>
   `endpoint-${specId}-${endpointId}-session`
 
-const loadEndpointSession = (specId: string, endpointId: number): { mode: 'view' | 'test'; session?: Partial<SessionState> } => {
+const loadEndpointSession = (specId: string, endpointId: number): { mode: 'view' | 'test' | 'edit'; session?: Partial<SessionState> } => {
   try {
     const saved = localStorage.getItem(getEndpointSessionKey(specId, endpointId))
     return saved ? JSON.parse(saved) : { mode: 'view' }
@@ -23,7 +26,7 @@ const loadEndpointSession = (specId: string, endpointId: number): { mode: 'view'
   }
 }
 
-const saveEndpointSession = (specId: string, endpointId: number, mode: 'view' | 'test', session?: SessionState) => {
+const saveEndpointSession = (specId: string, endpointId: number, mode: 'view' | 'test' | 'edit', session?: SessionState) => {
   try {
     localStorage.setItem(getEndpointSessionKey(specId, endpointId), JSON.stringify({ mode, session }))
   } catch (error) {
@@ -31,11 +34,127 @@ const saveEndpointSession = (specId: string, endpointId: number, mode: 'view' | 
   }
 }
 
-export default function EndpointDetail({ endpoint, specId, selectedEnv }: EndpointDetailProps) {
+export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps) {
+  // Mutation hooks
+  const updateEndpoint = useUpdateEndpoint()
+  const deleteEndpoint = useDeleteEndpoint()
+
   // Load saved session state
   const savedData = specId && endpoint.id ? loadEndpointSession(specId, endpoint.id) : { mode: 'view' as const }
-  const [mode, setMode] = useState<'view' | 'test'>(savedData.mode)
+  const [mode, setMode] = useState<'view' | 'test' | 'edit'>(savedData.mode)
   const [testSession, setTestSession] = useState<Partial<SessionState> | undefined>(savedData.session)
+
+  // Edit mode state
+  const [editHeaders, setEditHeaders] = useState<Record<string, string>>({})
+  const [editParams, setEditParams] = useState<Record<string, string>>({})
+  const [editBody, setEditBody] = useState('')
+  const [editFormData, setEditFormData] = useState<Record<string, any>>({})
+  const [editResponses, setEditResponses] = useState<any>(null)
+  const [editQueryParams, setEditQueryParams] = useState<any[]>([])
+  const [editHeaderParams, setEditHeaderParams] = useState<any[]>([])
+  const [editBodyFields, setEditBodyFields] = useState<any[]>([])
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+
+  // Load environments for this spec
+  const { data: environments } = useEnvironments(specId ? parseInt(specId) : 0)
+
+  // Global environment selection (per spec)
+  const [selectedEnvId, setSelectedEnvId] = useState<string | null>(() => {
+    if (specId) {
+      return localStorage.getItem(`spec-${specId}-selected-env`) || null
+    }
+    return null
+  })
+
+  // Update selected env when spec changes
+  useEffect(() => {
+    if (specId) {
+      const saved = localStorage.getItem(`spec-${specId}-selected-env`)
+      setSelectedEnvId(saved || null)
+    }
+  }, [specId])
+
+  // Save selected environment
+  useEffect(() => {
+    if (specId) {
+      if (selectedEnvId) {
+        localStorage.setItem(`spec-${specId}-selected-env`, selectedEnvId)
+      } else {
+        localStorage.removeItem(`spec-${specId}-selected-env`)
+      }
+    }
+  }, [selectedEnvId, specId])
+
+  // Calculate selectedEnv from environments array
+  const selectedEnvFromId = environments?.find(env => env.id === selectedEnvId)
+
+  // Reload mode when endpoint changes
+  useEffect(() => {
+    if (specId && endpoint.id) {
+      const savedData = loadEndpointSession(specId, endpoint.id)
+      setMode(savedData.mode)
+      setTestSession(savedData.session)
+    }
+  }, [endpoint.id, specId])
+
+
+  // Function to reset edit state from endpoint data
+  const resetEditState = () => {
+    // Initialize headers from endpoint - always include Content-Type
+    const initialHeaders: Record<string, string> = {
+      'Content-Type': endpoint.request?.contentType || 'application/json'
+    }
+    endpoint.request?.parameters?.filter((p: any) => p.in === 'header').forEach((p: any) => {
+      initialHeaders[p.name] = p.example || ''
+    })
+    setEditHeaders(initialHeaders)
+
+    // Initialize params from endpoint
+    const initialParams: Record<string, string> = {}
+    endpoint.request?.parameters?.filter((p: any) => p.in === 'query').forEach((p: any) => {
+      initialParams[p.name] = p.example || ''
+    })
+    setEditParams(initialParams)
+
+    // Initialize body from endpoint example
+    if (endpoint.request?.body?.example) {
+      setEditBody(JSON.stringify(endpoint.request.body.example, null, 2))
+    } else {
+      setEditBody('')
+    }
+
+    // Initialize form data
+    setEditFormData({})
+
+    // Initialize responses
+    setEditResponses(endpoint.responses ? { ...endpoint.responses } : null)
+
+    // Initialize query parameters
+    const queryParamsFromEndpoint = endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []
+    setEditQueryParams(queryParamsFromEndpoint)
+
+    // Initialize header parameters
+    const headerParamsFromEndpoint = endpoint.request?.parameters?.filter((p: any) => p.in === 'header') || []
+    setEditHeaderParams(headerParamsFromEndpoint)
+
+    // Initialize body fields
+    const bodyFieldsFromEndpoint = endpoint.request?.body?.fields || []
+    setEditBodyFields(bodyFieldsFromEndpoint)
+  }
+
+  // Initialize edit mode data when entering edit mode
+  useEffect(() => {
+    if (mode === 'edit') {
+      resetEditState()
+    }
+  }, [mode])  // Only reset when mode changes, not when endpoint changes
+
+  // Reset unsaved changes flag when endpoint prop changes (after successful save)
+  useEffect(() => {
+    if (mode === 'view') {
+      setHasUnsavedChanges(false)
+    }
+  }, [endpoint, mode])
 
   // Save mode when it changes
   useEffect(() => {
@@ -43,6 +162,27 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
       saveEndpointSession(specId, endpoint.id, mode, testSession as SessionState | undefined)
     }
   }, [mode, testSession, specId, endpoint.id])
+
+  // Detect changes in edit mode
+  useEffect(() => {
+    if (mode !== 'edit') {
+      setHasUnsavedChanges(false)
+      return
+    }
+
+    // Compare current edit state with original endpoint data
+    const originalQueryParams = endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []
+    const originalHeaderParams = endpoint.request?.parameters?.filter((p: any) => p.in === 'header') || []
+    const originalBodyFields = endpoint.request?.body?.fields || []
+    const originalResponses = endpoint.responses
+
+    const queryParamsChanged = JSON.stringify(editQueryParams) !== JSON.stringify(originalQueryParams)
+    const headerParamsChanged = JSON.stringify(editHeaderParams) !== JSON.stringify(originalHeaderParams)
+    const bodyFieldsChanged = JSON.stringify(editBodyFields) !== JSON.stringify(originalBodyFields)
+    const responsesChanged = JSON.stringify(editResponses) !== JSON.stringify(originalResponses)
+
+    setHasUnsavedChanges(queryParamsChanged || headerParamsChanged || bodyFieldsChanged || responsesChanged)
+  }, [mode, editQueryParams, editHeaderParams, editBodyFields, editResponses, endpoint])
 
   // Helper to get method color
   const getMethodColor = (method: string) => {
@@ -59,21 +199,93 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-3 mb-2">
-          <span className={`px-3 py-1 rounded-md border font-bold text-sm ${getMethodColor(endpoint.method)}`}>
-            {endpoint.method}
-          </span>
-          <code className="text-sm font-mono text-gray-700">{endpoint.path}</code>
-        </div>
-        {endpoint.name && (
-          <p className="text-sm text-gray-600 mt-2">{endpoint.name}</p>
-        )}
-        {endpoint.description && (
-          <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-gray-700">{endpoint.description}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-2">
+            <span className={`px-3 py-1 rounded-md border font-bold text-sm ${getMethodColor(endpoint.method)}`}>
+              {endpoint.method}
+            </span>
+            <code className="text-sm font-mono text-gray-700">{endpoint.path}</code>
           </div>
-        )}
+          {endpoint.name && (
+            <p className="text-sm text-gray-600 mt-2">{endpoint.name}</p>
+          )}
+          {endpoint.description && (
+            <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-gray-700">{endpoint.description}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          {/* Save/Cancel Buttons - Only show in Edit mode */}
+          {mode === 'edit' && (
+            <SaveCancelButtons
+              onSave={async () => {
+                if (!endpoint.id) return
+
+                try {
+                  // Build updated request object
+                  const updatedRequest = {
+                    ...endpoint.request,
+                    contentType: editHeaders['Content-Type'] || 'application/json',
+                    parameters: [
+                      ...editQueryParams,
+                      ...editHeaderParams,
+                    ],
+                    body: editBodyFields.length > 0 ? {
+                      required: endpoint.request?.body?.required ?? true,
+                      example: endpoint.request?.body?.example,
+                      fields: editBodyFields,
+                    } : endpoint.request?.body,
+                  }
+
+                  // Save to database using mutation hook
+                  // mutateAsync waits for onSuccess to complete, which includes refetch
+                  await updateEndpoint.mutateAsync({
+                    id: endpoint.id,
+                    data: {
+                      request: updatedRequest,
+                      responses: editResponses,
+                    }
+                  })
+
+                  // Switch to view mode - cache is now updated
+                  setMode('view')
+                  setHasUnsavedChanges(false)
+                } catch (error) {
+                  console.error('Failed to save endpoint changes:', error)
+                }
+              }}
+              onCancel={resetEditState}
+              hasUnsavedChanges={hasUnsavedChanges}
+            />
+          )}
+
+          {/* Delete Button - Only show in View mode */}
+          {mode === 'view' && endpoint.id && (
+            <Button
+              variant="danger"
+              size="sm"
+              icon={Trash2}
+              onClick={async () => {
+                if (!endpoint.id) return
+                const confirmed = window.confirm(
+                  `Are you sure you want to delete endpoint "${endpoint.method} ${endpoint.path}"?`
+                )
+                if (confirmed) {
+                  try {
+                    await deleteEndpoint.mutateAsync(endpoint.id)
+                  } catch (error) {
+                    console.error('Failed to delete endpoint:', error)
+                  }
+                }
+              }}
+              title="Delete endpoint"
+            />
+          )}
+        </div>
       </div>
 
       {/* Mode Toggle */}
@@ -100,6 +312,17 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
           <Play size={16} />
           Try It
         </button>
+        <button
+          onClick={() => setMode('edit')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            mode === 'edit'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Edit3 size={16} />
+          Edit
+        </button>
       </div>
 
       {/* View Mode */}
@@ -114,22 +337,26 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
               </h3>
             </div>
 
-            {/* Request URL */}
             <div className="p-4">
-              <div className="flex items-center gap-2">
-                <span className={`px-4 py-2 rounded font-semibold text-sm ${getMethodColor(endpoint.method)}`}>
-                  {endpoint.method}
-                </span>
-                <code className="text-sm font-mono text-gray-700">{endpoint.path}</code>
+              {/* Request URL */}
+              <div className="mb-4">
+                <div className="flex items-center gap-2">
+                  <span className={`px-4 py-2 rounded font-semibold text-sm ${getMethodColor(endpoint.method)}`}>
+                    {endpoint.method}
+                  </span>
+                  <div className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono text-gray-700 bg-gray-50">
+                    {endpoint.path}
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* Request Specification Tabs - View Mode */}
-            <RequestSpecificationTabs
-              endpoint={endpoint}
-              mode="view"
-              selectedEnv={selectedEnv}
-            />
+              {/* Request Specification Tabs - View Mode */}
+              <RequestSpecificationTabs
+                endpoint={endpoint}
+                mode="view"
+                selectedEnv={selectedEnvFromId}
+              />
+            </div>
           </div>
 
           {/* Response Specifications */}
@@ -142,121 +369,10 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
             </div>
 
             <div className="p-4">
-              {endpoint.responses ? (
-                <div className="space-y-4">
-                  {/* Success Response */}
-                  {endpoint.responses.success && (
-                    <div className="border rounded-lg overflow-hidden">
-                      <div className="px-4 py-2 flex items-center gap-2 bg-green-50 border-b border-green-200">
-                        <span className="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">
-                          {endpoint.responses.success.status || '200'}
-                        </span>
-                        <span className="text-sm font-medium text-gray-900">
-                          {endpoint.responses.success.description || 'Success'}
-                        </span>
-                      </div>
-
-                      {(endpoint.responses.success.contentType ||
-                        endpoint.responses.success.example ||
-                        (endpoint.responses.success.fields && endpoint.responses.success.fields.length > 0)) && (
-                        <div className="p-4">
-                          {endpoint.responses.success.contentType && (
-                            <div className="mb-3">
-                              <span className="text-xs font-semibold text-gray-500 uppercase">Content-Type</span>
-                              <div className="mt-1">
-                                <span className="text-xs font-mono px-2 py-1 bg-gray-100 text-gray-700 rounded">
-                                  {endpoint.responses.success.contentType}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-
-                          {endpoint.responses.success.example && (
-                            <div className="mb-4">
-                              <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Example</h5>
-                              <pre className="text-xs bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto">
-                                {JSON.stringify(endpoint.responses.success.example, null, 2)}
-                              </pre>
-                            </div>
-                          )}
-
-                          {endpoint.responses.success.fields && endpoint.responses.success.fields.length > 0 && (
-                            <div>
-                              <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Fields</h5>
-                              <div className="space-y-2">
-                                {endpoint.responses.success.fields.map((field, idx) => (
-                                  <div key={idx} className="p-3 bg-gray-50 rounded border border-gray-200">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <code className="text-sm font-mono text-gray-900">{field.name}</code>
-                                      <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                                        {field.type}
-                                      </span>
-                                      {field.format && (
-                                        <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
-                                          {field.format}
-                                        </span>
-                                      )}
-                                      {field.required && (
-                                        <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">
-                                          required
-                                        </span>
-                                      )}
-                                    </div>
-                                    {field.description && (
-                                      <p className="text-xs text-gray-600 mt-1">{field.description}</p>
-                                    )}
-                                    {field.example !== undefined && (
-                                      <div className="mt-2 text-xs">
-                                        <span className="font-medium text-gray-600">Example:</span>{' '}
-                                        <code className="text-purple-600">{JSON.stringify(field.example)}</code>
-                                      </div>
-                                    )}
-                                    {field.enum && (
-                                      <div className="mt-2 text-xs">
-                                        <span className="font-medium text-gray-600">Allowed values:</span>{' '}
-                                        {field.enum.map((v, i) => (
-                                          <code key={i} className="text-purple-600 mr-1">{JSON.stringify(v)}</code>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error Responses */}
-                  {endpoint.responses.errors && endpoint.responses.errors.length > 0 && (
-                    endpoint.responses.errors.map((error, idx) => (
-                      <div key={idx} className="border rounded-lg overflow-hidden">
-                        <div className="px-4 py-2 flex items-center gap-2 bg-red-50 border-b border-red-200">
-                          <span className="px-2 py-1 rounded text-xs font-bold bg-red-100 text-red-700">
-                            {error.status || '400'}
-                          </span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {error.reason || 'Error'}
-                          </span>
-                        </div>
-
-                        {error.example && (
-                          <div className="p-4">
-                            <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Example</h5>
-                            <pre className="text-xs bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto">
-                              {JSON.stringify(error.example, null, 2)}
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">No response specifications</p>
-              )}
+              <ResponseSpecificationEditor
+                responses={endpoint.responses}
+                mode="view"
+              />
             </div>
           </div>
         </>
@@ -267,10 +383,84 @@ export default function EndpointDetail({ endpoint, specId, selectedEnv }: Endpoi
         <RequestTester
           endpoint={endpoint}
           specId={specId}
-          selectedEnv={selectedEnv}
+          selectedEnv={selectedEnvFromId}
+          environments={environments}
+          selectedEnvId={selectedEnvId}
+          onEnvChange={setSelectedEnvId}
           initialSession={testSession}
           onSessionChange={setTestSession}
         />
+      )}
+
+      {/* Edit Mode */}
+      {mode === 'edit' && (
+        <>
+          {/* Request Specification - Editable */}
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="border-b border-gray-200 px-4 py-3">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Code2 size={20} className="text-purple-600" />
+                Request Specification
+              </h3>
+            </div>
+
+            <div className="p-4">
+              {/* Request URL */}
+              <div className="mb-4">
+                <div className="flex items-center gap-2">
+                  <span className={`px-4 py-2 rounded font-semibold text-sm ${getMethodColor(endpoint.method)}`}>
+                    {endpoint.method}
+                  </span>
+                  <div className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono text-gray-700 bg-gray-50">
+                    {endpoint.path}
+                  </div>
+                </div>
+              </div>
+
+              {/* Request Specification Tabs - Edit Mode */}
+              <RequestSpecificationTabs
+                endpoint={endpoint}
+                mode="edit"
+                selectedEnv={selectedEnvFromId}
+                headers={editHeaders}
+                params={editParams}
+                body={editBody}
+                formData={editFormData}
+                queryParams={editQueryParams}
+                headerParams={editHeaderParams}
+                bodyFields={editBodyFields}
+                onHeadersChange={setEditHeaders}
+                onParamsChange={setEditParams}
+                onBodyChange={setEditBody}
+                onFormDataChange={setEditFormData}
+                onQueryParamsChange={setEditQueryParams}
+                onHeaderParamsChange={setEditHeaderParams}
+                onBodyFieldsChange={setEditBodyFields}
+                onContentTypeChange={(contentType) => {
+                  setEditHeaders({ ...editHeaders, 'Content-Type': contentType })
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Response Specifications - Editable */}
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="border-b border-gray-200 px-4 py-3">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <FileText size={20} className="text-purple-600" />
+                Response Specifications
+              </h3>
+            </div>
+
+            <div className="p-4">
+              <ResponseSpecificationEditor
+                responses={editResponses}
+                onResponsesChange={setEditResponses}
+                mode="edit"
+              />
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

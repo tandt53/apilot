@@ -3,7 +3,32 @@
  * Base interface for all AI providers
  */
 
-import type {Endpoint, TestCase} from '@/types/database'
+import type {Endpoint, TestCase} from '../../src/types/database'
+
+/**
+ * Parsed test info for message history
+ */
+export interface ParsedTestInfo {
+  name: string
+  testType: 'single' | 'workflow' | 'integration'
+  method?: string
+  path?: string
+  endpointId?: number
+  status: 'complete' | 'partial' // whether it was fully parsed or had issues
+}
+
+/**
+ * Generation metadata for continuation
+ */
+export interface GenerationMetadata {
+  attemptedEndpointIds: number[] // Endpoints that were attempted (regardless of success)
+  successfulEndpointIds: number[] // Endpoints that got complete tests
+  partialEndpointIds: number[] // Endpoints that got partial/failed tests
+  completeParsedTests: ParsedTestInfo[] // Successfully parsed tests
+  partialParsedTests: ParsedTestInfo[] // Partially parsed or failed tests
+  rawResponseLength: number // Length of AI response
+  tokenLimitReached: boolean
+}
 
 export interface GenerateTestsOptions {
   endpoints: Endpoint[]
@@ -14,8 +39,7 @@ export interface GenerateTestsOptions {
   signal?: AbortSignal // For cancellation
 
   // For continuation after token limit
-  previousMessages?: Array<{role: 'user' | 'assistant', content: string}> // Conversation history
-  generatedTestsSummary?: string // Compact summary of already generated tests (titles + endpoints only)
+  previousMetadata?: GenerationMetadata // Metadata from previous generation attempts
 }
 
 export interface GenerateTestsResult {
@@ -26,8 +50,7 @@ export interface GenerateTestsResult {
   error?: 'TOKEN_LIMIT_REACHED' | 'ABORTED' | string
 
   // For continuation support
-  conversationMessages: Array<{role: 'user' | 'assistant', content: string}> // Full conversation history
-  generatedTestsSummary: string // Compact summary of all generated tests so far
+  metadata: GenerationMetadata // Detailed metadata for continuation
 }
 
 export interface TestConnectionResult {
@@ -56,9 +79,14 @@ export abstract class AIService {
 
   /**
    * Helper: Extract JSON blocks from AI response
+   * Returns both complete (successfully parsed) and partial (corrupted) tests
    */
-  protected extractJsonBlocks(text: string): any[] {
-    const jsonBlocks: any[] = []
+  protected extractJsonBlocks(text: string): {
+    complete: any[]
+    partial: ParsedTestInfo[]
+  } {
+    const complete: any[] = []
+    const partial: ParsedTestInfo[] = []
     const regex = /```json\s*([\s\S]*?)```/g
     let match
 
@@ -66,7 +94,7 @@ export abstract class AIService {
       try {
         const jsonString = match[1].trim()
         const json = JSON.parse(jsonString)
-        jsonBlocks.push(json)
+        complete.push(json)
       } catch (error) {
         console.error('Failed to parse JSON block:', error)
         console.error('Attempted to parse:', match[1].trim().substring(0, 500))
@@ -79,14 +107,52 @@ export abstract class AIService {
           fixed = fixed.replace(/'/g, '"')
           const json = JSON.parse(fixed)
           console.log('Successfully parsed after fixes')
-          jsonBlocks.push(json)
+          complete.push(json)
         } catch (retryError) {
           console.error('Still failed after attempted fixes')
+          // Extract partial info from corrupted JSON
+          const partialInfo = this.extractPartialTestInfo(match[1])
+          if (partialInfo) {
+            partial.push({
+              ...partialInfo,
+              status: 'partial'
+            })
+            console.warn('[AI Service] ⚠️ Tracked partial test:', partialInfo.name || 'unknown')
+          } else {
+            console.warn('[AI Service] ⚠️ Completely corrupted JSON block (no extractable info)')
+          }
         }
       }
     }
 
-    return jsonBlocks
+    return { complete, partial }
+  }
+
+  /**
+   * Helper: Extract partial test info from corrupted JSON
+   * Uses regex to find field values even when JSON is malformed
+   */
+  protected extractPartialTestInfo(brokenJson: string): ParsedTestInfo | null {
+    const nameMatch = brokenJson.match(/"name"\s*:\s*"([^"]+)"/)
+    const methodMatch = brokenJson.match(/"method"\s*:\s*"([^"]+)"/)
+    const pathMatch = brokenJson.match(/"path"\s*:\s*"([^"]+)"/)
+    const typeMatch = brokenJson.match(/"test_type"\s*:\s*"([^"]+)"/)
+    const endpointMethodMatch = brokenJson.match(/"endpoint_method"\s*:\s*"([^"]+)"/)
+    const endpointPathMatch = brokenJson.match(/"endpoint_path"\s*:\s*"([^"]+)"/)
+
+    // Need at least a name OR method+path to be useful
+    if (nameMatch || (methodMatch && pathMatch) || (endpointMethodMatch && endpointPathMatch)) {
+      return {
+        name: nameMatch?.[1] || 'Unknown Test',
+        method: methodMatch?.[1] || endpointMethodMatch?.[1],
+        path: pathMatch?.[1] || endpointPathMatch?.[1],
+        testType: (typeMatch?.[1] as 'single' | 'workflow' | 'integration') || 'single',
+        endpointId: undefined,
+        status: 'partial'
+      }
+    }
+
+    return null
   }
 
   /**

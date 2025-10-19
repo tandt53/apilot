@@ -83,31 +83,26 @@ export default function VariableInput({
     }
 
     return (
-      <div className="whitespace-pre-wrap break-words text-gray-900" style={{ pointerEvents: 'none' }}>
+      <div className="whitespace-pre-wrap break-words text-gray-900" style={{ pointerEvents: 'none', lineHeight: '1.5' }}>
         {parts.map((part, idx) => {
           if (part.type === 'text') {
-            // Regular text - visible in normal color, clicks pass through
-            return <span key={idx} style={{ pointerEvents: 'none' }}>{part.content}</span>
+            // Regular text - visible
+            return <span key={idx}>{part.content}</span>
           }
 
-          // Variable part - fully visible with colored background
+          // Variable part - highlighted with colored background
           const tooltipText = part.resolved ? `${part.varName}: ${variables[part.varName!]}` : 'Undefined variable'
 
           return (
             <span
               key={idx}
-              className={`rounded px-0.5 font-semibold ${
+              className={`font-semibold ${
                 part.resolved
                   ? 'bg-purple-200 text-purple-800'
                   : 'bg-orange-200 text-orange-800'
               }`}
-              style={{ pointerEvents: 'auto', cursor: 'text' }}
-              onClick={() => {
-                inputRef.current?.focus()
-              }}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect()
-                // Use absolute viewport coordinates for portal
                 setTooltip({
                   show: true,
                   text: tooltipText,
@@ -156,20 +151,98 @@ export default function VariableInput({
     document.body
   )
 
+  // Render tooltip interaction layer (transparent, only for hover events)
+  const renderTooltipLayer = () => {
+    if (!value) return null
+
+    const parts: Array<{ type: 'text' | 'variable'; content: string; varName?: string; resolved?: boolean }> = []
+    let lastIndex = 0
+    const regex = /\{\{([^}]+)\}\}/g
+    let match
+
+    while ((match = regex.exec(value)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({
+          type: 'text',
+          content: value.slice(lastIndex, match.index),
+        })
+      }
+
+      const varName = match[1].trim()
+      const resolved = varName in variables
+      parts.push({
+        type: 'variable',
+        content: match[0],
+        varName,
+        resolved,
+      })
+
+      lastIndex = match.index + match[0].length
+    }
+
+    if (lastIndex < value.length) {
+      parts.push({
+        type: 'text',
+        content: value.slice(lastIndex),
+      })
+    }
+
+    return (
+      <div className="whitespace-pre-wrap break-words" style={{ pointerEvents: 'none', lineHeight: '1.5' }}>
+        {parts.map((part, idx) => {
+          if (part.type === 'text') {
+            return <span key={idx} style={{ color: 'transparent' }}>{part.content}</span>
+          }
+
+          const tooltipText = part.resolved ? `${part.varName}: ${variables[part.varName!]}` : 'Undefined variable'
+
+          return (
+            <span
+              key={idx}
+              className="font-semibold"
+              style={{
+                pointerEvents: 'auto',
+                cursor: 'text',
+                color: 'transparent',
+                background: 'transparent'
+              }}
+              onClick={() => {
+                inputRef.current?.focus()
+              }}
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                setTooltip({
+                  show: true,
+                  text: tooltipText,
+                  x: rect.left + rect.width / 2,
+                  y: rect.top - 8
+                })
+              }}
+              onMouseLeave={() => {
+                setTooltip({ show: false, text: '', x: 0, y: 0 })
+              }}
+            >
+              {part.content}
+            </span>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <>
       {tooltipPortal}
       <div className="relative" ref={containerRef}>
 
-      {/* Highlighted overlay - always on top but allows clicks through */}
+      {/* Highlighted overlay - behind input, shows text with highlights */}
       {hasVariables && (
         <div
-          className={`absolute inset-0 overflow-hidden border border-gray-300 rounded px-3 py-2 text-sm font-mono ${
-            disabled ? 'bg-gray-50' : 'bg-white'
-          }`}
+          className={`absolute inset-0 overflow-hidden border border-gray-300 rounded px-3 py-2 text-sm font-mono bg-white`}
           style={{
-            zIndex: 1,
+            zIndex: 0,
             pointerEvents: 'none',
+            lineHeight: '1.5',
           }}
         >
           {renderHighlightedText()}
@@ -190,11 +263,14 @@ export default function VariableInput({
           className={baseInputClasses}
           style={hasVariables ? {
             position: 'relative',
-            zIndex: 0,
+            zIndex: 1,
             background: 'transparent',
             color: 'transparent',
-            caretColor: 'black',
-          } : {}}
+            caretColor: '#111827',
+            lineHeight: '1.5',
+          } : {
+            lineHeight: '1.5',
+          }}
         />
       ) : (
         <input
@@ -209,12 +285,29 @@ export default function VariableInput({
           className={baseInputClasses}
           style={hasVariables ? {
             position: 'relative',
-            zIndex: 0,
+            zIndex: 1,
             background: 'transparent',
             color: 'transparent',
-            caretColor: 'black',
-          } : {}}
+            caretColor: '#111827',
+            lineHeight: '1.5',
+          } : {
+            lineHeight: '1.5',
+          }}
         />
+      )}
+
+      {/* Tooltip interaction layer - on top, transparent, only for hover events */}
+      {hasVariables && (
+        <div
+          className={`absolute inset-0 overflow-hidden rounded px-3 py-2 text-sm font-mono`}
+          style={{
+            zIndex: 2,
+            pointerEvents: 'none',
+            lineHeight: '1.5',
+          }}
+        >
+          {renderTooltipLayer()}
+        </div>
       )}
       </div>
     </>

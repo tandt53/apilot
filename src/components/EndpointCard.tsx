@@ -8,6 +8,7 @@ interface EndpointCardProps {
   showCheckbox?: boolean
   isChecked?: boolean
   onCheckboxChange?: (checked: boolean) => void
+  disabled?: boolean
 }
 
 const methodColors: Record<string, string> = {
@@ -18,7 +19,7 @@ const methodColors: Record<string, string> = {
   PATCH: 'bg-purple-100 text-purple-700',
 }
 
-export default function EndpointCard({ method, path, name, stepCount, isSelected, onClick, showCheckbox, isChecked, onCheckboxChange }: EndpointCardProps) {
+export default function EndpointCard({ method, path, name, stepCount, isSelected, onClick, showCheckbox, isChecked, onCheckboxChange, disabled }: EndpointCardProps) {
   return (
     <button
       onClick={onClick}
@@ -26,7 +27,7 @@ export default function EndpointCard({ method, path, name, stepCount, isSelected
         isSelected
           ? 'bg-purple-200 rounded-2xl shadow-md'
           : 'hover:bg-white/40 hover:rounded-2xl hover:shadow-sm'
-      }`}
+      } ${disabled ? 'opacity-50' : ''}`}
     >
       <div className="flex items-center gap-2">
         <div className="flex-1 min-w-0">
@@ -51,12 +52,13 @@ export default function EndpointCard({ method, path, name, stepCount, isSelected
           <input
             type="checkbox"
             checked={isChecked}
+            disabled={disabled}
             onChange={(e) => {
               e.stopPropagation()
               onCheckboxChange?.(e.target.checked)
             }}
             onClick={(e) => e.stopPropagation()}
-            className="flex-shrink-0 ml-2"
+            className={`flex-shrink-0 ml-2 ${disabled ? 'cursor-not-allowed' : ''}`}
           />
         )}
       </div>

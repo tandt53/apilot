@@ -2,13 +2,14 @@ import {useEffect, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {useQuery, useQueryClient} from '@tanstack/react-query'
 import {useEnvironments, useSpecs} from '@/lib/hooks'
-import {FileCode, FolderClosed, FolderOpen, Search, Settings2, Trash2, Upload, X} from 'lucide-react'
+import {AlertCircle, Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
 import * as api from '@/lib/api'
 import EndpointDetail from '@/components/EndpointDetail'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
+import Button from '@/components/Button'
 import type {Endpoint, Spec} from '@/types/database'
 import {generateTestsViaIPC} from "@/lib/ai/client.ts";
 
@@ -42,7 +43,8 @@ export default function SpecsNew() {
   // Batch test generation states
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<number>>(new Set())
   const [isGenerating, setIsGenerating] = useState(false)
-  const [generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null)
+  const [_generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null)
+  const [selectionModeSpecId, setSelectionModeSpecId] = useState<number | null>(null)
 
   // Continue generation states (for token limit handling)
   const [remainingEndpointIds, setRemainingEndpointIds] = useState<Set<number>>(new Set())
@@ -137,8 +139,6 @@ export default function SpecsNew() {
   useEffect(() => {
     localStorage.setItem('specs-expanded-specs', JSON.stringify(Array.from(expandedSpecs)))
   }, [expandedSpecs])
-
-  const selectedEnv = environments?.find(env => env.id === selectedEnvId)
 
   const toggleSpec = (specId: number) => {
     const newExpanded = new Set(expandedSpecs)
@@ -251,15 +251,115 @@ export default function SpecsNew() {
     if (selectedSpecId === specId) {
       setSelectedSpecId(null)
     }
+    await refetch()
+  }
+
+  const handleEditSpec = (_specId: number) => {
+    // TODO: Implement edit spec modal/page
+    alert('Edit spec feature coming soon')
+  }
+
+  const handleExportSpec = async (spec: Spec) => {
+    try {
+      // Export as OpenAPI JSON
+      const exportData = {
+        ...JSON.parse(spec.rawSpec),
+        info: {
+          title: spec.name,
+          version: spec.version,
+          description: spec.description,
+        }
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${spec.name.replace(/\s+/g, '-')}-${spec.version}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export failed:', error)
+      alert('Failed to export spec')
+    }
+  }
+
+  const handleDuplicateSpec = async (spec: Spec) => {
+    try {
+      // Create a new spec with duplicated data
+      const newSpec = await api.createSpec({
+        name: `${spec.name} (Copy)`,
+        version: spec.version,
+        description: spec.description,
+        baseUrl: spec.baseUrl,
+        rawSpec: spec.rawSpec,
+        format: spec.format,
+        versionGroup: crypto.randomUUID(),
+        isLatest: true,
+        originalName: spec.originalName,
+      })
+
+      // Duplicate all endpoints
+      const specGroup = specGroups?.find(g => g.spec.id === spec.id)
+      const endpoints = specGroup?.endpoints || []
+
+      if (endpoints.length > 0) {
+        const endpointsData = endpoints.map(endpoint => ({
+          specId: newSpec.id!,
+          method: endpoint.method,
+          path: endpoint.path,
+          name: endpoint.name,
+          description: endpoint.description,
+          request: endpoint.request,
+          responses: endpoint.responses,
+          auth: endpoint.auth,
+          source: endpoint.source,
+          updatedAt: new Date(),
+          createdBy: 'manual' as const,
+        }))
+        await api.bulkCreateEndpoints(endpointsData)
+      }
+
+      // Refetch specs and spec-groups
       await refetch()
+      await queryClient.invalidateQueries({ queryKey: ['specs'] })
+      await queryClient.refetchQueries({ queryKey: ['spec-groups'] })
+
+      // Select the new duplicated spec
+      setSelectedSpecId(newSpec.id!)
+      setExpandedSpecs(prev => new Set(prev).add(newSpec.id!))
+
+      alert(`✓ Successfully duplicated spec with ${endpoints.length} endpoint(s)`)
+    } catch (error) {
+      console.error('Duplicate failed:', error)
+      alert('Failed to duplicate spec')
+    }
   }
 
   const handleContinueGeneration = async () => {
+    console.log('[SpecsNew] === CONTINUE GENERATION STARTED ===')
+    console.log('[SpecsNew] Selected spec ID:', selectedSpecId)
+    console.log('[SpecsNew] Remaining endpoint IDs:', Array.from(remainingEndpointIds))
+    console.log('[SpecsNew] Remaining count:', remainingEndpointIds.size)
+
     // Get endpoints for selected spec from specGroups
     const selectedSpecGroup = specGroups?.find(g => g.spec.id === selectedSpecId)
     const specEndpoints = selectedSpecGroup?.endpoints || []
 
-    if (!selectedSpecId || specEndpoints.length === 0 || remainingEndpointIds.size === 0) {
+    // IMPORTANT: When token limit is hit, we want to generate MORE tests for the SAME endpoints
+    // The remainingEndpointIds might be empty if all endpoints have tests, but we still want to continue
+    // So we check if we have metadata - if yes, continue with same endpoints
+    const hasConversationHistory = !!localStorage.getItem('tests-generation-metadata')
+
+    if (!selectedSpecId || specEndpoints.length === 0) {
+      alert('No endpoints found for selected spec')
+      return
+    }
+
+    // Only check remainingEndpointIds if we DON'T have conversation history
+    if (!hasConversationHistory && remainingEndpointIds.size === 0) {
       alert('No remaining endpoints to generate tests for')
       return
     }
@@ -280,7 +380,7 @@ export default function SpecsNew() {
       localStorage.setItem('tests-generating', 'true')
       localStorage.setItem('tests-generating-spec-id', String(selectedSpecId))
 
-      // Get remaining endpoints
+      // Get remaining endpoints to continue generating tests for
       const endpointsToGenerate = specEndpoints.filter(e => remainingEndpointIds.has(e.id!))
 
       console.log('[SpecsNew] Continuing generation for', endpointsToGenerate.length, 'remaining endpoints')
@@ -309,21 +409,32 @@ export default function SpecsNew() {
         }
       }
 
-      // Get conversation history for continuation
-      const previousMessages = localStorage.getItem('tests-conversation-messages')
-      const previousSummary = localStorage.getItem('tests-generated-summary')
+      // Get metadata for continuation
+      const previousMetadataStr = localStorage.getItem('tests-generation-metadata')
 
-      console.log('[SpecsNew] Continuing with history:', previousMessages ? 'Yes' : 'No')
+      console.log('[SpecsNew] 📥 LOADING metadata from localStorage:', {
+        exists: !!previousMetadataStr,
+        length: previousMetadataStr?.length,
+        preview: previousMetadataStr?.substring(0, 200)
+      })
+
+      const previousMetadata = previousMetadataStr ? JSON.parse(previousMetadataStr) : undefined
+
+      console.log('[SpecsNew] 📊 PARSED metadata:', {
+        completeParsedTests: previousMetadata?.completeParsedTests?.length || 0,
+        tests: previousMetadata?.completeParsedTests?.map((t: any) => t.name) || []
+      })
+
+      console.log('[SpecsNew] Endpoints to generate:', endpointsToGenerate.length)
 
       // Track saved test names to prevent duplicates
       const savedTestNames = new Set<string>()
 
-      // Generate tests for remaining endpoints with conversation history via IPC
+      // Generate tests for remaining endpoints with metadata for continuation
       const result = await generateTestsViaIPC({
         endpoints: endpointsToGenerate,
         spec: parsedSpec,
-        previousMessages: previousMessages ? JSON.parse(previousMessages) : undefined,
-        generatedTestsSummary: previousSummary || undefined,
+        previousMetadata,
         onProgress: (progress: any) => {
           setGenerationProgress({ current: progress.current, total: remainingEndpointIds.size })
         },
@@ -389,26 +500,32 @@ export default function SpecsNew() {
 
       // Handle result - could hit token limit again
       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {
-        console.log('[SpecsNew] Token limit reached again during continuation')
-        const completedCount = result.completedEndpointIds.length
-        const stillRemaining = result.remainingEndpointIds.length
+        console.log('[SpecsNew] ⚠️ Token limit reached AGAIN during continuation')
 
-        // Store updated token limit state and conversation
+        // Keep the same endpoints for another continuation
+        const endpointsForContinuation = Array.from(remainingEndpointIds)
+
+        // Store updated token limit state and metadata
         localStorage.setItem('tests-token-limit-reached', 'true')
-        localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(result.remainingEndpointIds))
-        localStorage.setItem('tests-completed-count', String(completedCount))
-        localStorage.setItem('tests-total-count', String(stillRemaining))
-        localStorage.setItem('tests-conversation-messages', JSON.stringify(result.conversationMessages))
-        localStorage.setItem('tests-generated-summary', result.generatedTestsSummary)
+        localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(endpointsForContinuation))
+        localStorage.setItem('tests-generation-metadata', JSON.stringify(result.metadata))
         localStorage.removeItem('tests-generating')
 
-        setRemainingEndpointIds(new Set(result.remainingEndpointIds))
+        console.log('[SpecsNew] 💾 SAVED metadata to localStorage:', {
+          completeParsedTests: result.metadata.completeParsedTests.length,
+          tests: result.metadata.completeParsedTests.map((t: any) => t.name),
+          raw: JSON.stringify(result.metadata).substring(0, 200)
+        })
+
+        setRemainingEndpointIds(new Set(endpointsForContinuation))
         setShowContinueButton(true)
         setPartialGenerationMessage(
-          `Generated tests for ${completedCount} more endpoints. ${stillRemaining} endpoints still remaining (token limit reached again).`
+          `Generated ${result.tests?.length || 0} more tests but hit token limit again. Click continue to generate more.`
         )
+
+        console.log('[SpecsNew] Continue button should still be visible')
       } else {
-        // Full completion - clear everything including conversation
+        // Full completion - clear everything
         console.log('[SpecsNew] All remaining tests generated successfully')
         setSelectedEndpointIds(new Set())
         setRemainingEndpointIds(new Set())
@@ -420,8 +537,7 @@ export default function SpecsNew() {
         localStorage.removeItem('tests-remaining-endpoint-ids')
         localStorage.removeItem('tests-completed-count')
         localStorage.removeItem('tests-total-count')
-        localStorage.removeItem('tests-conversation-messages')
-        localStorage.removeItem('tests-generated-summary')
+        localStorage.removeItem('tests-generation-metadata')
       }
     } catch (error: any) {
       console.error('Continue generation error:', error)
@@ -454,9 +570,8 @@ export default function SpecsNew() {
       setIsGenerating(true)
       setGenerationProgress({ current: 0, total: selectedEndpointIds.size })
 
-      // Clear any previous conversation history (this is a NEW generation, not a continuation)
-      localStorage.removeItem('tests-conversation-messages')
-      localStorage.removeItem('tests-generated-summary')
+      // Clear any previous metadata (this is a NEW generation, not a continuation)
+      localStorage.removeItem('tests-generation-metadata')
       localStorage.removeItem('tests-token-limit-reached')
       localStorage.removeItem('tests-remaining-endpoint-ids')
       localStorage.removeItem('tests-completed-count')
@@ -499,9 +614,9 @@ export default function SpecsNew() {
         }
       }
 
-      // Get conversation history if continuing (should be empty for new generation)
-      const previousMessages = localStorage.getItem('tests-conversation-messages')
-      const previousSummary = localStorage.getItem('tests-generated-summary')
+      // Get metadata if continuing (should be empty for new generation)
+      const previousMetadataStr = localStorage.getItem('tests-generation-metadata')
+      const previousMetadata = previousMetadataStr ? JSON.parse(previousMetadataStr) : undefined
 
       // Track saved test names to prevent duplicates
       const savedTestNames = new Set<string>()
@@ -510,8 +625,7 @@ export default function SpecsNew() {
       const result = await generateTestsViaIPC({
         endpoints: endpointsToGenerate,
         spec: parsedSpec,
-        previousMessages: previousMessages ? JSON.parse(previousMessages) : undefined,
-        generatedTestsSummary: previousSummary || undefined,
+        previousMetadata,
         onProgress: (progress: any) => {
           setGenerationProgress({ current: progress.current, total: selectedEndpointIds.size })
         },
@@ -578,30 +692,51 @@ export default function SpecsNew() {
 
       // Handle partial completion (token limit reached)
       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {
-        console.log('[SpecsNew] Token limit reached. Storing state for Tests page.')
+        console.log('[SpecsNew] ⚠️ TOKEN LIMIT REACHED - Showing continue button')
+        console.log('[SpecsNew] Result:', {
+          completed: result.completed,
+          error: result.error,
+          completedEndpointIds: result.completedEndpointIds,
+          remainingEndpointIds: result.remainingEndpointIds,
+          testsGenerated: result.tests?.length
+        })
+
         const completedCount = result.completedEndpointIds.length
         const totalCount = selectedEndpointIds.size
 
+        // When token limit is hit, we want to continue generating MORE tests
+        // So we keep the SAME endpoints, not "remaining" endpoints
+        const endpointsForContinuation = Array.from(selectedEndpointIds)
+
         // Store token limit state in localStorage for Tests page
         localStorage.setItem('tests-token-limit-reached', 'true')
-        localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(result.remainingEndpointIds))
+        localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(endpointsForContinuation))
         localStorage.setItem('tests-completed-count', String(completedCount))
         localStorage.setItem('tests-total-count', String(totalCount))
 
-        // Store conversation history and summary for continuation
-        localStorage.setItem('tests-conversation-messages', JSON.stringify(result.conversationMessages))
-        localStorage.setItem('tests-generated-summary', result.generatedTestsSummary)
+        // Store metadata for continuation
+        localStorage.setItem('tests-generation-metadata', JSON.stringify(result.metadata))
+
+        console.log('[SpecsNew] 💾 SAVED metadata to localStorage:', {
+          completeParsedTests: result.metadata.completeParsedTests.length,
+          tests: result.metadata.completeParsedTests.map((t: any) => t.name),
+          raw: JSON.stringify(result.metadata).substring(0, 200)
+        })
 
         localStorage.removeItem('tests-generating') // Stop the "generating" state
 
-        // Keep local state for Specs page
-        setRemainingEndpointIds(new Set(result.remainingEndpointIds))
+        // Keep local state for Specs page - use selected endpoints, not remaining
+        setRemainingEndpointIds(new Set(endpointsForContinuation))
         setShowContinueButton(true)
         setPartialGenerationMessage(
-          `Generated tests for ${completedCount} of ${totalCount} endpoints (token limit reached).`
+          `Generated ${result.tests?.length || 0} tests but hit token limit. Click continue to generate more tests.`
         )
+
+        console.log('[SpecsNew] Continue button should now be visible')
+        console.log('[SpecsNew] showContinueButton:', true)
+        console.log('[SpecsNew] remainingEndpointIds:', endpointsForContinuation)
       } else {
-        // Full completion - clear everything including conversation history
+        // Full completion - clear everything
         setSelectedEndpointIds(new Set())
         setRemainingEndpointIds(new Set())
         setShowContinueButton(false)
@@ -612,8 +747,7 @@ export default function SpecsNew() {
         localStorage.removeItem('tests-remaining-endpoint-ids')
         localStorage.removeItem('tests-completed-count')
         localStorage.removeItem('tests-total-count')
-        localStorage.removeItem('tests-conversation-messages')
-        localStorage.removeItem('tests-generated-summary')
+        localStorage.removeItem('tests-generation-metadata')
       }
     } catch (error: any) {
       console.error('Test generation error:', error)
@@ -750,81 +884,129 @@ export default function SpecsNew() {
                             <p className="text-xs text-gray-500">v{spec.version}</p>
                           </div>
                         </button>
+
+                        {/* Generate Tests / Actions - Only show when expanded */}
+                        {isExpanded && (
+                          <div className="flex items-center gap-1">
+                            {selectionModeSpecId === spec.id ? (
+                              // Selection mode: Show Generate + Cancel buttons
+                              <>
+                                <Button
+                                  variant="save"
+                                  size="sm"
+                                  icon={Zap}
+                                  highlighted={selectedCountForSpec > 0}
+                                  onClick={() => handleBatchGenerate()}
+                                  disabled={isGenerating || selectedCountForSpec === 0}
+                                  title={selectedCountForSpec > 0 ? `Generate tests for ${selectedCountForSpec} endpoints` : 'Select endpoints first'}
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  icon={X}
+                                  onClick={() => {
+                                    setSelectionModeSpecId(null)
+                                    setSelectedEndpointIds(new Set())
+                                  }}
+                                  title="Cancel selection"
+                                />
+                              </>
+                            ) : (
+                              // Normal mode: Show trigger button (highlighted)
+                              <Button
+                                variant="save"
+                                size="sm"
+                                icon={Sparkles}
+                                highlighted={true}
+                                onClick={() => {
+                                  setSelectionModeSpecId(spec.id!)
+                                  setSelectedEndpointIds(new Set())
+                                }}
+                                title="Generate tests"
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
 
-                      {/* Partial Generation Warning - shown when token limit reached */}
-                      {isExpanded && showContinueButton && partialGenerationMessage && spec.id === selectedSpecId && (
-                        <div className="ml-2 mt-2 mb-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                          <p className="text-xs text-yellow-800">{partialGenerationMessage}</p>
+                      {/* Selection Mode Info Banner */}
+                      {isExpanded && selectionModeSpecId === spec.id && (
+                        <div className="ml-2 mt-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-700">
+                            {selectedCountForSpec === 0 ? (
+                              'Select up to 5 endpoints to generate tests'
+                            ) : selectedCountForSpec >= 5 ? (
+                              `✓ Maximum 5 endpoints selected`
+                            ) : (
+                              `${selectedCountForSpec} of 5 endpoints selected`
+                            )}
+                          </p>
                         </div>
                       )}
 
-                      {/* Generate/Continue Tests Button - shown when spec is expanded and has selected endpoints */}
-                      {isExpanded && (selectedCountForSpec > 0 || (showContinueButton && spec.id === selectedSpecId)) && (
-                        <div className="ml-2 mt-2 mb-1">
-                          <button
-                            onClick={() => {
-                              if (showContinueButton && spec.id === selectedSpecId) {
-                                // Call continue handler if we're in continue mode
-                                handleContinueGeneration()
-                              } else {
-                                handleBatchGenerate()
-                              }
-                            }}
-                            disabled={isGenerating}
-                            className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed text-sm ${
-                              showContinueButton && spec.id === selectedSpecId
-                                ? 'bg-orange-600 hover:bg-orange-700'
-                                : 'bg-purple-600 hover:bg-purple-700'
-                            }`}
-                          >
-                            {isGenerating ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                Generating {generationProgress?.current || 0}/{generationProgress?.total || 0}
-                              </>
-                            ) : showContinueButton && spec.id === selectedSpecId ? (
-                              <>
-                                <Settings2 size={16} />
-                                Continue Generation ({remainingEndpointIds.size} remaining)
-                              </>
-                            ) : (
-                              <>
-                                <Settings2 size={16} />
-                                Generate Tests ({selectedCountForSpec})
-                              </>
-                            )}
-                          </button>
+                      {/* Partial Generation Warning - shown when token limit reached */}
+                      {isExpanded && showContinueButton && partialGenerationMessage && spec.id === selectedSpecId && (
+                        <div className="ml-2 mt-2 mb-2 p-4 bg-orange-50 border border-orange-200 rounded-lg border-l-4 border-l-orange-500">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle size={20} className="text-orange-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-sm font-semibold text-orange-900 mb-1">Generation Paused</h3>
+                              <p className="text-sm text-orange-700 mb-3">{partialGenerationMessage}</p>
+                              <button
+                                onClick={handleContinueGeneration}
+                                disabled={isGenerating}
+                                className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center justify-center gap-2"
+                              >
+                                {isGenerating ? (
+                                  <>
+                                    <span className="animate-spin">⏳</span>
+                                    Continuing...
+                                  </>
+                                ) : (
+                                  'Continue Generation'
+                                )}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
 
                       {/* Endpoints List */}
                       {isExpanded && filteredEndpoints.length > 0 && (
                         <div className="ml-2 mt-1 space-y-1">
-                          {filteredEndpoints.map((endpoint) => (
-                            <EndpointCard
-                              key={endpoint.id}
-                              method={endpoint.method}
-                              path={endpoint.path}
-                              name={endpoint.name}
-                              isSelected={endpoint.id === selectedEndpointId}
-                              onClick={() => {
-                                setSelectedEndpointId(endpoint.id!)
-                                setSelectedSpecId(spec.id!)
-                              }}
-                              showCheckbox={true}
-                              isChecked={selectedEndpointIds.has(endpoint.id!)}
-                              onCheckboxChange={(checked) => {
-                                const newSelected = new Set(selectedEndpointIds)
-                                if (checked) {
-                                  newSelected.add(endpoint.id!)
-                                } else {
-                                  newSelected.delete(endpoint.id!)
-                                }
-                                setSelectedEndpointIds(newSelected)
-                              }}
-                            />
-                          ))}
+                          {filteredEndpoints.map((endpoint) => {
+                            const isChecked = selectedEndpointIds.has(endpoint.id!)
+                            const canCheck = isChecked || selectedCountForSpec < 5
+
+                            return (
+                              <EndpointCard
+                                key={endpoint.id}
+                                method={endpoint.method}
+                                path={endpoint.path}
+                                name={endpoint.name}
+                                isSelected={endpoint.id === selectedEndpointId}
+                                onClick={() => {
+                                  setSelectedEndpointId(endpoint.id!)
+                                  setSelectedSpecId(spec.id!)
+                                }}
+                                showCheckbox={selectionModeSpecId === spec.id}
+                                isChecked={isChecked}
+                                onCheckboxChange={(checked) => {
+                                  const newSelected = new Set(selectedEndpointIds)
+                                  if (checked) {
+                                    // Only allow checking if under limit
+                                    if (newSelected.size < 5) {
+                                      newSelected.add(endpoint.id!)
+                                    }
+                                  } else {
+                                    newSelected.delete(endpoint.id!)
+                                  }
+                                  setSelectedEndpointIds(newSelected)
+                                }}
+                                disabled={!canCheck && selectionModeSpecId === spec.id}
+                              />
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -849,7 +1031,6 @@ export default function SpecsNew() {
               <EndpointDetail
                 endpoint={selectedEndpoint}
                 specId={String(selectedSpecId)}
-                selectedEnv={selectedEnv}
               />
             </div>
           ) : (
@@ -864,12 +1045,41 @@ export default function SpecsNew() {
                       <p className="text-sm text-gray-600 mt-2">{selectedSpec.description}</p>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleDeleteSpec(selectedSpec.id!, selectedSpec.name)}
-                    className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-50 transition-all"
-                  >
-                    <Trash2 size={20} />
-                  </button>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Edit3}
+                      onClick={() => handleEditSpec(selectedSpec.id!)}
+                      title="Edit spec metadata (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Download}
+                      onClick={() => handleExportSpec(selectedSpec)}
+                      title="Export spec (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Copy}
+                      onClick={() => handleDuplicateSpec(selectedSpec)}
+                      title="Duplicate spec (coming soon)"
+                      disabled
+                    />
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={Trash2}
+                      onClick={() => handleDeleteSpec(selectedSpec.id!, selectedSpec.name)}
+                      title="Delete spec"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-sm">

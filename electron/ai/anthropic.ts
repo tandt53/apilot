@@ -3,7 +3,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import type {TestCase} from '@/types/database'
+import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type GenerateTestsResult, type TestConnectionResult} from './base'
 import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
 
@@ -25,7 +25,7 @@ export class AnthropicService extends AIService {
     super()
     this.client = new Anthropic({
       apiKey: config.apiKey,
-      dangerouslyAllowBrowser: true, // Required for desktop Electron app
+      // Running in main process
     })
     this.model = config.model || 'claude-3-5-sonnet-20241022'
     this.temperature = config.temperature ?? 0.7
@@ -89,8 +89,15 @@ export class AnthropicService extends AIService {
         completed: true,
         completedEndpointIds: [],
         remainingEndpointIds: [],
-        conversationMessages: [],
-        generatedTestsSummary: ''
+        metadata: {
+          attemptedEndpointIds: [],
+          successfulEndpointIds: [],
+          partialEndpointIds: [],
+          completeParsedTests: [],
+          partialParsedTests: [],
+          rawResponseLength: 0,
+          tokenLimitReached: false
+        }
       }
     }
 
@@ -135,7 +142,8 @@ export class AnthropicService extends AIService {
           fullResponse += content
 
           // Try to extract JSON blocks as they arrive
-          const jsonBlocks = this.extractJsonBlocks(fullResponse)
+          const { complete: jsonBlocks } = this.extractJsonBlocks(fullResponse)
+          // Only process complete blocks during streaming
 
           // If we have new blocks, process them
           if (jsonBlocks.length > lastJsonBlockCount) {
@@ -248,29 +256,19 @@ export class AnthropicService extends AIService {
       console.log(fullResponse)
       console.log('[Anthropic Service] === END FULL AI RESPONSE ===')
 
-      // Final extraction to catch any remaining blocks
-      const finalBlocks = this.extractJsonBlocks(fullResponse)
-      console.log('[Anthropic Service] Final extraction found', finalBlocks.length, 'total blocks')
+      // Final extraction to catch any remaining blocks and partial tests
+      const { complete: finalBlocks, partial: partialBlocks } = this.extractJsonBlocks(fullResponse)
+      console.log('[Anthropic Service] Final extraction found', finalBlocks.length, 'complete blocks')
 
-      // Log details of all extracted blocks
-      console.log('[Anthropic Service] === EXTRACTED JSON BLOCKS ===')
-      finalBlocks.forEach((block, index) => {
-        console.log(`[Anthropic Service] Block ${index + 1}:`, {
-          name: block.name,
-          testType: block.test_type,
-          method: block.method || 'N/A',
-          path: block.path || 'N/A',
-          hasSteps: !!block.steps,
-          stepCount: block.steps?.length || 0,
-        })
-        if (block.test_type === 'workflow' && block.steps) {
-          console.log(`[Anthropic Service]   Workflow steps:`)
-          block.steps.forEach((step: any, stepIdx: number) => {
-            console.log(`[Anthropic Service]     Step ${stepIdx + 1}: ${step.name} (${step.method} ${step.path})`)
-          })
+      // Track partial tests (corrupted JSON)
+      const partialParsedTests: import('./base').ParsedTestInfo[] = []
+      if (partialBlocks.length > 0) {
+        console.log('[Anthropic] ⚠️  Detected', partialBlocks.length, 'partial/corrupted tests')
+        for (const partial of partialBlocks) {
+          partialParsedTests.push(partial)
+          console.warn('[Anthropic] ⚠️  Partial test:', partial.name || 'Unknown', `(${partial.method || '?'} ${partial.path || '?'})`)
         }
-      })
-      console.log('[Anthropic Service] === END EXTRACTED JSON BLOCKS ===')
+      }
 
       for (let i = lastJsonBlockCount; i < finalBlocks.length; i++) {
         const block = finalBlocks[i]
@@ -302,13 +300,38 @@ export class AnthropicService extends AIService {
 
       const completedEndpointIds = endpoints.map(e => e.id).filter((id): id is number => id !== undefined)
 
+      // Note: Anthropic SDK doesn't expose stop_reason in streaming, so we can't detect token limits
+      // For now, always treat as completed. TODO: Add token limit detection
+      const tokenLimitReached = false
+
+      // If token limit reached, keep all attempted endpoints in remaining list for next iteration
+      const remainingEndpointIds = tokenLimitReached
+        ? endpoints.map(e => e.id!).filter(id => id !== undefined)
+        : []
+
+      const completed = !tokenLimitReached && remainingEndpointIds.length === 0
+
       return {
         tests,
-        completed: true,
+        completed,
         completedEndpointIds,
-        remainingEndpointIds: [],
-        conversationMessages: [{ role: 'user', content: '' }],
-        generatedTestsSummary: `Generated ${tests.length} test(s) for ${endpoints.length} endpoint(s)`
+        remainingEndpointIds,
+        metadata: {
+          attemptedEndpointIds: completedEndpointIds,
+          successfulEndpointIds: completedEndpointIds,
+          partialEndpointIds: [],
+          completeParsedTests: tests.map(t => ({
+            name: t.name || 'Untitled',
+            testType: t.testType || 'single',
+            method: t.method,
+            path: t.path,
+            endpointId: t.currentEndpointId,
+            status: 'complete' as const
+          })),
+          partialParsedTests,
+          rawResponseLength: fullResponse.length,
+          tokenLimitReached
+        }
       }
     } catch (error: any) {
       console.error('[Anthropic Service] Generation error:', error)

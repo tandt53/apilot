@@ -1,7 +1,6 @@
 /**
- * AI Service - Public API
- * Exports lazy-loaded functions to avoid bundling Node.js modules
+ * AI Client Exports
+ * Re-exports from client.ts for backward compatibility
  */
 
-export * from './base'
-export { getCurrentAIService, testAIConnection } from './client'
+export { testAIConnection, generateTestsViaIPC } from './client'

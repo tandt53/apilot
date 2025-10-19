@@ -150,8 +150,14 @@ export function useUpdateEndpoint() {
     onSuccess: async (_, variables) => {
       const endpoint = await api.getEndpoint(variables.id)
       if (endpoint) {
-        queryClient.invalidateQueries({ queryKey: endpointsKeys.detail(variables.id) })
-        queryClient.invalidateQueries({ queryKey: endpointsKeys.list(endpoint.specId) })
+        // Invalidate spec-groups (used by SpecsNew.tsx)
+        await queryClient.refetchQueries({ queryKey: ['spec-groups'] })
+
+        // Also invalidate endpoints list (in case used elsewhere)
+        await queryClient.refetchQueries({ queryKey: endpointsKeys.list(endpoint.specId) })
+
+        // Update detail cache
+        queryClient.setQueryData(endpointsKeys.detail(variables.id), endpoint)
       }
     },
   })

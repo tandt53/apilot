@@ -9,17 +9,19 @@ import {
     FolderOpen,
     Loader2,
     RefreshCw,
-    Save,
     Search,
     Trash2,
     X,
 } from 'lucide-react'
 import * as api from '@/lib/api'
+import {deleteTestCasesBySpec} from '@/lib/api/testCases'
 import RequestTester, {SessionState} from '@/components/RequestTester'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
+import SaveCancelButtons from '@/components/SaveCancelButtons'
+import Button from '@/components/Button'
 import {useEnvironments} from '@/lib/hooks'
 import type {Spec, TestCase} from '@/types/database'
 
@@ -40,17 +42,23 @@ const getSessionKey = (testId: number, stepIndex?: number) => {
 const loadSession = (testId: number, stepIndex?: number): Partial<SessionState> | undefined => {
   try {
     const saved = localStorage.getItem(getSessionKey(testId, stepIndex))
-    return saved ? JSON.parse(saved) : undefined
-  } catch {
+    if (!saved) return undefined
+
+    const parsed = JSON.parse(saved)
+    console.log('[Tests] Loaded session for test', testId, ':', parsed)
+    return parsed
+  } catch (error) {
+    console.error('[Tests] Failed to load session:', error)
     return undefined
   }
 }
 
 const saveSession = (testId: number, session: SessionState, stepIndex?: number) => {
   try {
+    console.log('[Tests] Saving session for test', testId, ':', session)
     localStorage.setItem(getSessionKey(testId, stepIndex), JSON.stringify(session))
   } catch (error) {
-    console.error('Failed to save session:', error)
+    console.error('[Tests] Failed to save session:', error)
   }
 }
 
@@ -248,6 +256,17 @@ export default function Tests() {
     [allTestCases, selectedTestId]
   )
 
+  // Memoize session to avoid recreating on every render
+  const initialSessionForSingleTest = useMemo(
+    () => selectedTest?.id ? loadSession(selectedTest.id) : undefined,
+    [selectedTest?.id]
+  )
+
+  const initialSessionForWorkflowStep = useMemo(
+    () => selectedTest?.id && selectedStepIndex !== null ? loadSession(selectedTest.id, selectedStepIndex) : undefined,
+    [selectedTest?.id, selectedStepIndex]
+  )
+
   // Auto-expand the generating spec and its sections when generation starts
   useEffect(() => {
     if (isGenerating && generatingSpecId) {
@@ -264,12 +283,12 @@ export default function Tests() {
     }
   }, [isGenerating, generatingSpecId])
 
-  // Auto-scroll to bottom of generating spec's test list when tests are added
+  // Auto-scroll to skeleton when generation starts (only once, not on every test added)
   useEffect(() => {
     if (isGenerating && generatingSpecId && testListRef.current) {
-      testListRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      testListRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [testGroups, isGenerating, generatingSpecId])
+  }, [isGenerating, generatingSpecId])
 
   // Sync test name and description when selectedTest changes
   useEffect(() => {
@@ -557,19 +576,32 @@ export default function Tests() {
               </button>
             </div>
 
-            {/* Generating Banner */}
+            {/* Generating Banner - Sticky at top */}
             {isGenerating && (
-              <div className="m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0">
+              <div className="sticky top-0 z-10 m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0 shadow-lg">
                 <Loader2 size={18} className="text-blue-600 animate-spin flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold text-blue-900">Generating Tests</h3>
                   <p className="text-xs text-blue-700">Auto-refreshing...</p>
                 </div>
                 <button
-                  onClick={() => {
-                    setIsGenerating(false)
-                    searchParams.delete('generating')
-                    setSearchParams(searchParams)
+                  onClick={async () => {
+                    console.log('[Tests] Stop button clicked - cancelling generation')
+                    try {
+                      const result = await (window as any).electron.cancelGeneration()
+                      console.log('[Tests] Cancel result:', result)
+                      setIsGenerating(false)
+                      searchParams.delete('generating')
+                      setSearchParams(searchParams)
+                      localStorage.removeItem('tests-generating')
+                      localStorage.removeItem('tests-generating-spec-id')
+                    } catch (error) {
+                      console.error('[Tests] Failed to cancel generation:', error)
+                      // Still update UI even if cancel fails
+                      setIsGenerating(false)
+                      searchParams.delete('generating')
+                      setSearchParams(searchParams)
+                    }
                   }}
                   className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex-shrink-0"
                 >
@@ -580,39 +612,39 @@ export default function Tests() {
 
             {/* Token Limit Banner with Continue/Stop Buttons */}
             {tokenLimitReached && !isGenerating && (
-              <div className="m-4 mb-2 p-3 glass-card rounded-2xl flex items-center gap-3 flex-shrink-0 border-l-4 border-orange-500">
-                <AlertCircle size={18} className="text-orange-600 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-orange-900">Generation Paused</h3>
-                  <p className="text-xs text-orange-700">
-                    The AI reached its response limit. Would you like to continue generating more tests?
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    // Stop generation - clear all state and hide banner
-                    console.log('[Tests] User stopped generation')
-                    setTokenLimitReached(false)
-                    setRemainingEndpointIds([])
-                    setCompletedCount(0)
-                    setTotalCount(0)
-                    localStorage.removeItem('tests-token-limit-reached')
-                    localStorage.removeItem('tests-remaining-endpoint-ids')
-                    localStorage.removeItem('tests-completed-count')
-                    localStorage.removeItem('tests-total-count')
-                    localStorage.removeItem('tests-conversation-messages')
-                    localStorage.removeItem('tests-generated-summary')
-                    localStorage.removeItem('tests-generating-spec-id')
-                  }}
-                  className="px-3 py-1 text-xs bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all flex-shrink-0"
-                >
-                  Stop
-                </button>
+              <div className="m-4 mb-2 p-4 glass-card rounded-2xl border-l-4 border-orange-500">
+                <div className="flex items-start gap-3">
+                  <AlertCircle size={20} className="text-orange-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold text-orange-900 mb-1">Generation Paused</h3>
+                    <p className="text-sm text-orange-700 mb-3">
+                      The AI reached its response limit. Would you like to continue generating more tests?
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          // Stop generation - clear all state and hide banner
+                          console.log('[Tests] User stopped generation')
+                          setTokenLimitReached(false)
+                          setRemainingEndpointIds([])
+                          setCompletedCount(0)
+                          setTotalCount(0)
+                          localStorage.removeItem('tests-token-limit-reached')
+                          localStorage.removeItem('tests-remaining-endpoint-ids')
+                          localStorage.removeItem('tests-completed-count')
+                          localStorage.removeItem('tests-total-count')
+                          localStorage.removeItem('tests-generation-metadata')
+                          localStorage.removeItem('tests-generating-spec-id')
+                        }}
+                        className="px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all"
+                      >
+                        Stop
+                      </button>
                 <button
                   onClick={async () => {
                     try {
                       // Import necessary modules
-                      const { getCurrentAIService } = await import('@/lib/ai')
+                      const { generateTestsViaIPC } = await import('@/lib/ai/client')
                       const { getEndpointsBySpec, createTestCase } = await import('@/lib/api')
 
                       // Set generating state
@@ -666,23 +698,30 @@ export default function Tests() {
                         }
                       }
 
-                      // Get AI service
-                      const aiService = await getCurrentAIService()
+                      // Get metadata for continuation
+                      const previousMetadataStr = localStorage.getItem('tests-generation-metadata')
 
-                      // Get conversation history for continuation
-                      const previousMessagesStr = localStorage.getItem('tests-conversation-messages')
-                      const previousSummary = localStorage.getItem('tests-generated-summary')
-                      const previousMessages = previousMessagesStr ? JSON.parse(previousMessagesStr) : undefined
+                      console.log('[Tests] 📥 LOADING metadata from localStorage:', {
+                        exists: !!previousMetadataStr,
+                        length: previousMetadataStr?.length,
+                        preview: previousMetadataStr?.substring(0, 200)
+                      })
 
-                      console.log('[Tests] Continuing with history:', previousMessages ? 'Yes' : 'No')
+                      const previousMetadata = previousMetadataStr ? JSON.parse(previousMetadataStr) : undefined
 
-                      // Generate tests for remaining endpoints with conversation history
-                      const result = await aiService.generateTests({
+                      console.log('[Tests] 📊 PARSED metadata:', {
+                        completeParsedTests: previousMetadata?.completeParsedTests?.length || 0,
+                        tests: previousMetadata?.completeParsedTests?.map((t: any) => t.name) || []
+                      })
+
+                      console.log('[Tests] Continuing generation for', endpointsToGenerate.length, 'endpoints')
+
+                      // Generate tests via IPC (secure main process execution)
+                      const result = await generateTestsViaIPC({
                         endpoints: endpointsToGenerate,
                         spec: parsedSpec,
-                        previousMessages,
-                        generatedTestsSummary: previousSummary || undefined,
-                        onTestGenerated: async (test) => {
+                        previousMetadata,
+                        onTestGenerated: async (test: any) => {
                           await createTestCase(test as any)
                           refetch()
                         },
@@ -691,14 +730,19 @@ export default function Tests() {
                       // Handle result
                       if (!result.completed && result.error === 'TOKEN_LIMIT_REACHED') {
                         console.log('[Tests] Token limit reached again')
-                        // Update state for another continuation, including conversation
+                        // Update state for another continuation
                         localStorage.setItem('tests-token-limit-reached', 'true')
                         localStorage.setItem('tests-remaining-endpoint-ids', JSON.stringify(result.remainingEndpointIds))
                         localStorage.setItem('tests-completed-count', String(result.completedEndpointIds.length))
                         localStorage.setItem('tests-total-count', String(result.remainingEndpointIds.length))
-                        localStorage.setItem('tests-conversation-messages', JSON.stringify(result.conversationMessages))
-                        localStorage.setItem('tests-generated-summary', result.generatedTestsSummary)
+                        localStorage.setItem('tests-generation-metadata', JSON.stringify(result.metadata))
                         localStorage.removeItem('tests-generating')
+
+                        console.log('[Tests] 💾 SAVED metadata to localStorage:', {
+                          completeParsedTests: result.metadata.completeParsedTests.length,
+                          tests: result.metadata.completeParsedTests.map((t: any) => t.name),
+                          raw: JSON.stringify(result.metadata).substring(0, 200)
+                        })
                       } else {
                         // All done - clear everything including conversation
                         console.log('[Tests] All tests generated successfully')
@@ -709,7 +753,7 @@ export default function Tests() {
                         localStorage.removeItem('tests-completed-count')
                         localStorage.removeItem('tests-total-count')
                         localStorage.removeItem('tests-conversation-messages')
-                        localStorage.removeItem('tests-generated-summary')
+                        localStorage.removeItem('tests-generation-metadata')
                         setTokenLimitReached(false)
                       }
                     } catch (error: any) {
@@ -722,10 +766,13 @@ export default function Tests() {
                       setSearchParams(searchParams)
                     }
                   }}
-                  className="px-3 py-1 text-xs bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-all flex-shrink-0"
+                  className="px-4 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-all font-medium"
                 >
-                  Continue Generation
+                  Continue
                 </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -737,7 +784,7 @@ export default function Tests() {
               <p className="text-sm text-gray-600">Generate tests from your API specifications</p>
             </div>
           ) : (
-            <div className="p-4 pb-24 space-y-2 flex-1 overflow-auto">
+            <div className="p-4 pb-40 space-y-2 flex-1 overflow-auto">
               {testGroups
                 .map(group => {
                   const query = searchQuery.toLowerCase()
@@ -939,6 +986,37 @@ export default function Tests() {
                       <p className="text-sm text-gray-600 mt-2">{selectedSpec.description}</p>
                     )}
                   </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const group = testGroups?.find(g => g.spec.id === selectedSpecId)
+                      const totalTests = (group?.singleTests.length || 0) + (group?.workflowTests.length || 0)
+
+                      return totalTests > 0 ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={Trash2}
+                          onClick={async () => {
+                            const confirmed = window.confirm(
+                              `Delete all tests for "${selectedSpec.name}"?\n\nThis will delete ${totalTests} test(s) and their execution history. The spec itself will NOT be deleted.`
+                            )
+                            if (confirmed) {
+                              try {
+                                await deleteTestCasesBySpec(selectedSpecId!)
+                                refetch()
+                                setSelectedTestId(null)
+                              } catch (error: any) {
+                                alert(`Failed to delete tests: ${error.message}`)
+                              }
+                            }
+                          }}
+                          title="Delete all tests for this spec"
+                        />
+                      ) : null
+                    })()}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 text-sm">
@@ -997,8 +1075,8 @@ export default function Tests() {
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Save button - only enabled if changes detected */}
-                    <button
-                      onClick={async () => {
+                    <SaveCancelButtons
+                      onSave={async () => {
                         try {
                           const updates: any = {}
 
@@ -1030,25 +1108,18 @@ export default function Tests() {
                           console.error('Failed to save changes:', error)
                         }
                       }}
-                      disabled={!hasUnsavedChanges}
-                      className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${
-                        hasUnsavedChanges
-                          ? 'bg-purple-600 text-white hover:bg-purple-700'
-                          : 'text-gray-300 cursor-not-allowed'
-                      }`}
-                      title={hasUnsavedChanges ? "Save changes" : "No changes to save"}
-                    >
-                      <Save size={18} />
-                      {hasUnsavedChanges && <span className="text-sm font-medium">Save</span>}
-                    </button>
+                      hasUnsavedChanges={hasUnsavedChanges}
+                      saveOnly={true}
+                      saveLabel="Save changes"
+                    />
                     {/* Delete button */}
-                    <button
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon={Trash2}
                       onClick={() => handleDelete(selectedTest.id!, selectedTest.name)}
-                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                       title="Delete test"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    />
                   </div>
                 </div>
               </div>
@@ -1074,10 +1145,10 @@ export default function Tests() {
                           if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
                             fields.push({
                               name: key,
-                              type: 'string',
+                              type: 'file',
                               format: 'binary',
                               required: false,
-                              example: undefined,
+                              example: value,
                               description: 'File upload'
                             })
                           } else {
@@ -1133,7 +1204,7 @@ export default function Tests() {
                           ],
                           body
                         },
-                        // Add assertions for display
+                        // Current test assertions (will be used as initial state)
                         assertions: selectedTest.assertions
                       } as any}
                       testCase={selectedTest}
@@ -1146,8 +1217,9 @@ export default function Tests() {
                       environments={environments}
                       selectedEnvId={selectedEnvId}
                       onEnvChange={setSelectedEnvId}
-                      initialSession={loadSession(selectedTest.id!)}
+                      initialSession={initialSessionForSingleTest}
                       onSessionChange={(session) => saveSession(selectedTest.id!, session)}
+                      defaultAssertions={selectedTest.assertions}
                     />
                   )
                 })()
@@ -1293,7 +1365,7 @@ export default function Tests() {
                             environments={environments}
                             selectedEnvId={selectedEnvId}
                             onEnvChange={setSelectedEnvId}
-                            initialSession={loadSession(selectedTest.id!, selectedStepIndex)}
+                            initialSession={initialSessionForWorkflowStep}
                             onSessionChange={(session) => saveSession(selectedTest.id!, session, selectedStepIndex)}
                           />
                         )
