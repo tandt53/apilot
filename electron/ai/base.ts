@@ -83,10 +83,10 @@ export abstract class AIService {
    */
   protected extractJsonBlocks(text: string): {
     complete: any[]
-    partial: Partial<ParsedTestInfo>[]
+    partial: ParsedTestInfo[]
   } {
     const complete: any[] = []
-    const partial: Partial<ParsedTestInfo>[] = []
+    const partial: ParsedTestInfo[] = []
     const regex = /```json\s*([\s\S]*?)```/g
     let match
 
@@ -132,7 +132,7 @@ export abstract class AIService {
    * Helper: Extract partial test info from corrupted JSON
    * Uses regex to find field values even when JSON is malformed
    */
-  protected extractPartialTestInfo(brokenJson: string): Partial<ParsedTestInfo> | null {
+  protected extractPartialTestInfo(brokenJson: string): ParsedTestInfo | null {
     const nameMatch = brokenJson.match(/"name"\s*:\s*"([^"]+)"/)
     const methodMatch = brokenJson.match(/"method"\s*:\s*"([^"]+)"/)
     const pathMatch = brokenJson.match(/"path"\s*:\s*"([^"]+)"/)
@@ -143,7 +143,7 @@ export abstract class AIService {
     // Need at least a name OR method+path to be useful
     if (nameMatch || (methodMatch && pathMatch) || (endpointMethodMatch && endpointPathMatch)) {
       return {
-        name: nameMatch?.[1],
+        name: nameMatch?.[1] || 'Unknown Test',
         method: methodMatch?.[1] || endpointMethodMatch?.[1],
         path: pathMatch?.[1] || endpointPathMatch?.[1],
         testType: (typeMatch?.[1] as 'single' | 'workflow' | 'integration') || 'single',

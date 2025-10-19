@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "composite": true,
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "lib": ["ES2022"]
   },
-  "include": ["vite.config.mts", "electron"]
+  "include": ["vite.config.mts", "electron", "src/types/**/*"]
 }
