@@ -23,13 +23,43 @@ export async function createEndpoint(data: Omit<Endpoint, 'id' | 'createdAt'>): 
  * Bulk create endpoints
  */
 export async function bulkCreateEndpoints(endpoints: Omit<Endpoint, 'id' | 'createdAt'>[]): Promise<number[]> {
+  console.warn('💾💾💾 [API] bulkCreateEndpoints() called 💾💾💾')
+  console.warn(`  Endpoints to create: ${endpoints.length}`)
+
+  // DEBUG: Check POST /pet description
+  const postPet = endpoints.find(e => e.method === 'POST' && e.path === '/pet')
+  if (postPet) {
+    console.warn('  POST /pet - request.body.description:', postPet.request?.body?.description)
+  }
+
   const now = new Date()
   const endpointsWithTimestamp = endpoints.map(e => ({
     ...e,
     createdAt: now,
   })) as Endpoint[]
 
+  // DEBUG: Check if description survives the map
+  const postPetAfterMap = endpointsWithTimestamp.find(e => e.method === 'POST' && e.path === '/pet')
+  if (postPetAfterMap) {
+    console.warn('  After adding timestamp, POST /pet request.body.description:', postPetAfterMap.request?.body?.description)
+    console.warn('  Full POST /pet body:', postPetAfterMap.request?.body)
+  }
+
+  console.warn('  Calling db.endpoints.bulkAdd()...')
   const ids = await db.endpoints.bulkAdd(endpointsWithTimestamp, { allKeys: true })
+  console.warn(`✅ [API] bulkAdd complete - created ${ids.length} endpoints`)
+
+  // DEBUG: Immediately read back from DB to verify
+  if (ids.length > 0) {
+    const firstId = ids[0] as number
+    const readBack = await db.endpoints.get(firstId)
+    console.warn('  🔍 Read back first endpoint from DB:')
+    console.warn('    ID:', firstId)
+    console.warn('    Method/Path:', readBack?.method, readBack?.path)
+    console.warn('    request.body.description:', readBack?.request?.body?.description)
+    console.warn('    request.body keys:', readBack?.request?.body ? Object.keys(readBack.request.body) : 'no body')
+  }
+
   return ids as number[]
 }
 
@@ -37,7 +67,18 @@ export async function bulkCreateEndpoints(endpoints: Omit<Endpoint, 'id' | 'crea
  * Get endpoint by ID
  */
 export async function getEndpoint(id: number): Promise<Endpoint | undefined> {
-  return db.endpoints.get(id)
+  const endpoint = await db.endpoints.get(id)
+
+  if (endpoint) {
+    console.warn('📖 [API] getEndpoint() - Loading from database')
+    console.warn(`  Endpoint ID: ${id}`)
+    console.warn(`  ${endpoint.method} ${endpoint.path}`)
+    console.warn('  RAW endpoint.request?.body:', endpoint.request?.body)
+    console.warn('  request.body.description:', endpoint.request?.body?.description)
+    console.warn('  Full endpoint object:', JSON.stringify(endpoint, null, 2))
+  }
+
+  return endpoint
 }
 
 /**
@@ -51,7 +92,14 @@ export async function getEndpointsBySpec(specId: number): Promise<Endpoint[]> {
  * Update endpoint
  */
 export async function updateEndpoint(id: number, data: Partial<Omit<Endpoint, 'id' | 'specId' | 'createdAt'>>): Promise<void> {
+  console.warn('🟢🟢🟢 [API] updateEndpoint() called 🟢🟢🟢')
+  console.warn('  Endpoint ID:', id)
+  console.warn('  request.body.description:', data.request?.body?.description)
+  console.warn('  Full update data:', JSON.stringify(data, null, 2))
+
   await db.endpoints.update(id, data)
+
+  console.warn('✅ [API] Database update complete')
 }
 
 /**

@@ -10,6 +10,7 @@ export * from './testCases'
 export * from './executions'
 export * from './settings'
 export * from './environments'
+export * from './imports'
 
 // Also export database instance for direct access if needed
 export { db } from '@/lib/db'

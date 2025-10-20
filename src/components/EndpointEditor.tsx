@@ -21,6 +21,7 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
   const [description, setDescription] = useState(endpoint.description || '')
   const [parameters, setParameters] = useState(endpoint.request?.parameters || [])
   const [contentType, setContentType] = useState(endpoint.request?.contentType || 'application/json')
+  const [bodyDescription, setBodyDescription] = useState(endpoint.request?.body?.description || '')
   const [bodyExample, setBodyExample] = useState(
     endpoint.request?.body?.example ? JSON.stringify(endpoint.request.body.example, null, 2) : ''
   )
@@ -28,10 +29,16 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
 
   // Reset state when endpoint changes
   useEffect(() => {
+    console.warn('═══════════════════════════════════════════')
+    console.warn(`[Endpoint Editor] LOADING ${endpoint.method} ${endpoint.path}`)
+    console.warn('  request.body.description:', endpoint.request?.body?.description)
+    console.warn('═══════════════════════════════════════════')
+
     setName(endpoint.name || '')
     setDescription(endpoint.description || '')
     setParameters(endpoint.request?.parameters || [])
     setContentType(endpoint.request?.contentType || 'application/json')
+    setBodyDescription(endpoint.request?.body?.description || '')
     setBodyExample(
       endpoint.request?.body?.example ? JSON.stringify(endpoint.request.body.example, null, 2) : ''
     )
@@ -58,12 +65,13 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
       name !== (endpoint.name || '') ||
       description !== (endpoint.description || '') ||
       contentType !== (endpoint.request?.contentType || 'application/json') ||
+      bodyDescription !== (endpoint.request?.body?.description || '') ||
       bodyExample !== (endpoint.request?.body?.example ? JSON.stringify(endpoint.request.body.example, null, 2) : '') ||
       JSON.stringify(parameters) !== JSON.stringify(endpoint.request?.parameters || []) ||
       JSON.stringify(bodyFields) !== JSON.stringify(endpoint.request?.body?.fields || [])
 
     setHasUnsavedChanges(changed)
-  }, [name, description, contentType, bodyExample, parameters, bodyFields, endpoint])
+  }, [name, description, contentType, bodyDescription, bodyExample, parameters, bodyFields, endpoint])
 
   // Handlers for parameter changes
   const handleQueryParamsChange = (newParams: any[]) => {
@@ -89,6 +97,10 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
   }
 
   const handleSave = async () => {
+    console.warn('🔴🔴🔴 [Endpoint Editor] SAVE BUTTON CLICKED 🔴🔴🔴')
+    console.warn(`  Endpoint: ${endpoint.method} ${endpoint.path}`)
+    console.warn(`  Current body description: ${endpoint.request?.body?.description}`)
+
     setError(null)
     setIsSaving(true)
 
@@ -109,7 +121,7 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
         }
       }
 
-      // Prepare update data (excluding read-only fields: method, path, operationId)
+      // Prepare update data - ONLY update edited fields, preserve everything else
       const updates = {
         name,
         description,
@@ -117,19 +129,33 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
           ...endpoint.request,
           parameters,
           contentType,
-          body: bodyData || bodyFields.length > 0 ? {
-            required: true, // Auto-set to true if body exists
+          // Always preserve body if it exists, never set to undefined
+          body: endpoint.request?.body ? {
+            ...endpoint.request.body, // Preserve ALL existing body fields first
+            required: endpoint.request.body.required, // Preserve original required value
+            example: bodyData !== null ? bodyData : endpoint.request.body.example, // Only update if edited
+            fields: bodyFields, // Update fields
+            description: bodyDescription, // Update description (can be empty string)
+          } : (bodyData || bodyFields.length > 0 || bodyDescription ? {
+            // Create new body only if one doesn't exist and user added content
+            required: true,
             example: bodyData,
             fields: bodyFields,
-            description: endpoint.request?.body?.description
-          } : undefined
-        }
+            description: bodyDescription,
+          } : undefined)
+        },
+        updatedAt: new Date(), // Set timestamp
       }
 
       // Save to database
       if (!endpoint.id) {
         throw new Error('Endpoint ID is required')
       }
+
+      console.warn('═══════════════════════════════════════════')
+      console.warn(`[Endpoint Editor] SAVING ${endpoint.method} ${endpoint.path}`)
+      console.warn('  request.body.description:', updates.request.body?.description)
+      console.warn('═══════════════════════════════════════════')
 
       await updateEndpoint(endpoint.id, updates)
       setHasUnsavedChanges(false)
@@ -298,6 +324,23 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
                   {contentType === 'text/plain' && '📄 Plain text request body - define raw text example below'}
                   {!['application/json', 'multipart/form-data', 'application/x-www-form-urlencoded', 'application/xml', 'text/plain'].includes(contentType) &&
                     `Custom content type - configure in Headers tab`}
+                </p>
+              </div>
+
+              {/* Body Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Body Description
+                </label>
+                <textarea
+                  value={bodyDescription}
+                  onChange={(e) => setBodyDescription(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+                  placeholder="Describe what this request body represents (e.g., User object, Pet data)"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Optional description of the request body purpose
                 </p>
               </div>
 
