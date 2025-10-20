@@ -46,8 +46,8 @@ export function convertOpenAPIToCanonical(
     // Check operation-level security first, then fall back to global security
     const security = operation.security !== undefined ? operation.security : spec.security;
 
-    return {
-      source: 'openapi',
+    const result = {
+      source: 'openapi' as const,
       method: method.toUpperCase(),
       path,
       name: operation.summary || `${method.toUpperCase()} ${path}`,
@@ -59,6 +59,10 @@ export function convertOpenAPIToCanonical(
       responses: convertResponses(operation.responses, spec),
       auth: convertSecurity(security, spec),
     }
+
+    console.log(`[OpenAPI Converter] ${method.toUpperCase()} ${path} - request.body.description:`, result.request?.body?.description)
+
+    return result
   } catch (error) {
     console.error(`[OpenAPI Converter] Error converting ${method.toUpperCase()} ${path}:`, error)
     throw error
@@ -219,12 +223,16 @@ function convertRequestBody(
   const isFormData = contentType === 'multipart/form-data' ||
                      contentType === 'application/x-www-form-urlencoded'
 
-  return {
+  const result = {
     required: resolvedBody.required || false,
     description: resolvedBody.description,
     example: isFormData ? undefined : example,  // Hide example for form data
     fields,
   }
+
+  console.log('[OpenAPI Converter] Request body description:', result.description)
+
+  return result
 }
 
 /**
@@ -313,8 +321,8 @@ function extractErrorResponses(responses: any, spec: any): any[] {
   for (const [code, responseRef] of Object.entries(responses)) {
     const statusCode = parseInt(code)
 
-    // Only process 4xx and 5xx
-    if (statusCode < 400 || statusCode >= 600) {
+    // Skip non-numeric codes (like "default") and non-error codes
+    if (isNaN(statusCode) || statusCode < 400 || statusCode >= 600) {
       continue
     }
 

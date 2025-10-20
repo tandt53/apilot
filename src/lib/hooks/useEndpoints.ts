@@ -4,7 +4,9 @@
 
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query'
 import * as api from '@/lib/api'
+import * as importApi from '@/lib/api/imports'
 import type {Endpoint} from '@/types/database'
+import type {ImportOptions} from '@/lib/api/imports'
 import {specsKeys} from './useSpecs'
 
 /**
@@ -179,5 +181,68 @@ export function useDeleteEndpoint() {
       }
       queryClient.invalidateQueries({ queryKey: endpointsKeys.all })
     },
+  })
+}
+
+// ============================================
+// Import Hooks
+// ============================================
+
+/**
+ * Analyze import to detect duplicates
+ */
+export function useAnalyzeImport() {
+  return useMutation({
+    mutationFn: ({
+      endpoints,
+      targetSpecId,
+    }: {
+      endpoints: Omit<Endpoint, 'id' | 'createdAt'>[]
+      targetSpecId: number
+    }) => importApi.analyzeImport(endpoints, targetSpecId),
+  })
+}
+
+/**
+ * Import endpoints to existing spec
+ */
+export function useImportEndpoints() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      endpoints,
+      targetSpecId,
+      options,
+    }: {
+      endpoints: Omit<Endpoint, 'id' | 'createdAt'>[]
+      targetSpecId: number
+      options: ImportOptions
+    }) => importApi.importEndpoints(endpoints, targetSpecId, options),
+    onSuccess: (_, variables) => {
+      // Invalidate endpoints list for the target spec
+      queryClient.invalidateQueries({ queryKey: endpointsKeys.list(variables.targetSpecId) })
+
+      // Invalidate spec stats
+      queryClient.invalidateQueries({ queryKey: specsKeys.stats(variables.targetSpecId) })
+
+      // Invalidate all endpoints (in case deprecated endpoints need updating)
+      queryClient.invalidateQueries({ queryKey: endpointsKeys.all })
+    },
+  })
+}
+
+/**
+ * Get quick import stats
+ */
+export function useImportStats() {
+  return useMutation({
+    mutationFn: ({
+      endpoints,
+      targetSpecId,
+    }: {
+      endpoints: Omit<Endpoint, 'id' | 'createdAt'>[]
+      targetSpecId: number
+    }) => importApi.getImportStats(endpoints, targetSpecId),
   })
 }

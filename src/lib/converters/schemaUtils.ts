@@ -63,9 +63,9 @@ function generateStringExample(schema: any, fieldName?: string): string {
   if (schema.format) {
     switch (schema.format) {
       case 'date-time':
-        return new Date().toISOString()
+        return '2024-01-01T00:00:00.000Z'
       case 'date':
-        return new Date().toISOString().split('T')[0]
+        return '2024-01-01'
       case 'time':
         return '10:30:00'
       case 'email':

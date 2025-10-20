@@ -10,6 +10,7 @@ import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
 import Button from '@/components/Button'
+import ImportPreviewDialog from '@/components/ImportPreviewDialog'
 import type {Endpoint, Spec} from '@/types/database'
 import {generateTestsViaIPC} from "@/lib/ai/client.ts";
 
@@ -39,6 +40,13 @@ export default function SpecsNew() {
   const [importMode, setImportMode] = useState<'file' | 'text'>('file')
   const [curlText, setCurlText] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+
+  // Import preview state
+  const [showImportPreview, setShowImportPreview] = useState(false)
+  const [parsedImportData, setParsedImportData] = useState<{
+    data: any
+    detection: any
+  } | null>(null)
 
   // Batch test generation states
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<number>>(new Set())
@@ -183,7 +191,7 @@ export default function SpecsNew() {
     }
   }
 
-  const importContent = async (content: string, sourceName: string) => {
+  const importContent = async (content: string, _sourceName: string) => {
     // Use unified parser to detect and parse format
     const { parseImportedContent } = await import('@/lib/converters')
     const parseResult = await parseImportedContent(content)
@@ -196,53 +204,20 @@ export default function SpecsNew() {
 
     console.log(`[Import] Detected format: ${detection.format} (${detection.version || 'unknown version'})`)
 
-    // Create spec
-    const spec = await api.createSpec({
-      name: parsedData.name || sourceName,
-      version: parsedData.version || '1.0.0',
-      description: parsedData.description,
-      baseUrl: parsedData.baseUrl || '',
-      rawSpec: parsedData.rawSpec,
-      format: detection.format as any, // Store detected format
-      versionGroup: crypto.randomUUID(),
-      isLatest: true,
-      originalName: parsedData.name || sourceName,
-    })
+    // Store parsed data and show preview dialog
+    setParsedImportData({ data: parsedData, detection })
+    setShowUploadModal(false)
+    setShowImportPreview(true)
+  }
 
-    // Import endpoints (already converted to canonical format)
-    const endpointsData = parsedData.endpoints.map(endpoint => ({
-      specId: spec.id!,
-      ...endpoint,
-      updatedAt: new Date(),
-      createdBy: 'import' as const,
-    }))
-
-    if (endpointsData.length > 0) {
-      await api.bulkCreateEndpoints(endpointsData)
-    }
-
-    // Import variables as environment if present (for Postman collections)
-    if (parsedData.variables && Object.keys(parsedData.variables).length > 0) {
-      await api.createEnvironment({
-        specId: spec.id!,
-        name: 'Imported Variables',
-        baseUrl: parsedData.baseUrl || '',
-        variables: parsedData.variables,
-      })
-    }
-
-    // Refetch specs first, then spec-groups to load endpoints for new spec
+  const handleImportSuccess = async () => {
+    // Refresh data after import
     await refetch()
     await queryClient.invalidateQueries({ queryKey: ['specs'] })
     await queryClient.refetchQueries({ queryKey: ['spec-groups'] })
 
-    setShowUploadModal(false)
-    setSelectedSpecId(spec.id!)
-    // Auto-expand the newly imported spec
-    setExpandedSpecs(prev => new Set(prev).add(spec.id!))
-
-    // Show success message with format info
-    alert(`✓ Successfully imported ${detection.format.toUpperCase()} with ${parsedData.endpoints.length} endpoint(s)`)
+    setShowImportPreview(false)
+    setParsedImportData(null)
   }
 
   const handleDeleteSpec = async (specId: number, name: string) => {
@@ -1197,6 +1172,21 @@ export default function SpecsNew() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Import Preview Dialog */}
+      {showImportPreview && parsedImportData && (
+        <ImportPreviewDialog
+          isOpen={showImportPreview}
+          parsedData={parsedImportData.data}
+          detection={parsedImportData.detection}
+          specs={specs || []}
+          onSuccess={handleImportSuccess}
+          onCancel={() => {
+            setShowImportPreview(false)
+            setParsedImportData(null)
+          }}
+        />
       )}
     </>
   )

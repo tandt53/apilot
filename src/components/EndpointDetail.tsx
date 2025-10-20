@@ -53,6 +53,7 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
   const [editQueryParams, setEditQueryParams] = useState<any[]>([])
   const [editHeaderParams, setEditHeaderParams] = useState<any[]>([])
   const [editBodyFields, setEditBodyFields] = useState<any[]>([])
+  const [editBodyDescription, setEditBodyDescription] = useState<string>('')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   // Load environments for this spec
@@ -140,6 +141,10 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
     // Initialize body fields
     const bodyFieldsFromEndpoint = endpoint.request?.body?.fields || []
     setEditBodyFields(bodyFieldsFromEndpoint)
+
+    // Initialize body description
+    const bodyDescriptionFromEndpoint = endpoint.request?.body?.description || ''
+    setEditBodyDescription(bodyDescriptionFromEndpoint)
   }
 
   // Initialize edit mode data when entering edit mode
@@ -155,6 +160,17 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
       setHasUnsavedChanges(false)
     }
   }, [endpoint, mode])
+
+  // Track changes in edit mode
+  useEffect(() => {
+    if (mode === 'edit') {
+      const originalBodyDescription = endpoint.request?.body?.description || ''
+      const hasChanges = editBodyDescription !== originalBodyDescription
+      if (hasChanges) {
+        setHasUnsavedChanges(true)
+      }
+    }
+  }, [editBodyDescription, mode, endpoint])
 
   // Save mode when it changes
   useEffect(() => {
@@ -233,11 +249,15 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
                     parameters: [
                       ...editQueryParams,
                       ...editHeaderParams,
+                      // Preserve path and cookie params (not editable in this view)
+                      ...(endpoint.request?.parameters?.filter(p => p.in === 'path' || p.in === 'cookie') || [])
                     ],
-                    body: editBodyFields.length > 0 ? {
+                    body: editBodyFields.length > 0 || editBodyDescription ? {
+                      ...endpoint.request?.body, // Preserve all existing body fields
                       required: endpoint.request?.body?.required ?? true,
                       example: endpoint.request?.body?.example,
                       fields: editBodyFields,
+                      description: editBodyDescription || undefined, // Save edited description
                     } : endpoint.request?.body,
                   }
 
@@ -248,6 +268,7 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
                     data: {
                       request: updatedRequest,
                       responses: editResponses,
+                      updatedAt: new Date(), // Set timestamp
                     }
                   })
 
@@ -429,6 +450,7 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
                 queryParams={editQueryParams}
                 headerParams={editHeaderParams}
                 bodyFields={editBodyFields}
+                bodyDescription={editBodyDescription}
                 onHeadersChange={setEditHeaders}
                 onParamsChange={setEditParams}
                 onBodyChange={setEditBody}
@@ -436,6 +458,7 @@ export default function EndpointDetail({ endpoint, specId }: EndpointDetailProps
                 onQueryParamsChange={setEditQueryParams}
                 onHeaderParamsChange={setEditHeaderParams}
                 onBodyFieldsChange={setEditBodyFields}
+                onBodyDescriptionChange={setEditBodyDescription}
                 onContentTypeChange={(contentType) => {
                   setEditHeaders({ ...editHeaders, 'Content-Type': contentType })
                 }}

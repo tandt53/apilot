@@ -14,6 +14,7 @@ interface RequestSpecificationTabsProps {
   queryParams?: Field[]
   headerParams?: Field[]
   bodyFields?: Field[]
+  bodyDescription?: string
   onHeadersChange?: (headers: Record<string, string>) => void
   onParamsChange?: (params: Record<string, string>) => void
   onBodyChange?: (body: string) => void
@@ -21,6 +22,7 @@ interface RequestSpecificationTabsProps {
   onQueryParamsChange?: (params: Field[]) => void
   onHeaderParamsChange?: (headers: Field[]) => void
   onBodyFieldsChange?: (fields: Field[]) => void
+  onBodyDescriptionChange?: (description: string) => void
   onContentTypeChange?: (contentType: string) => void
   // Common props
   selectedEnv?: any
@@ -42,12 +44,14 @@ export default function RequestSpecificationTabs({
   queryParams = [],
   headerParams = [],
   bodyFields = [],
+  bodyDescription = '',
   onHeadersChange,
   onParamsChange,
   onBodyChange,
   onFormDataChange,
   onQueryParamsChange,
   onHeaderParamsChange,
+  onBodyDescriptionChange,
   onBodyFieldsChange,
   onContentTypeChange,
   selectedEnv,
@@ -363,6 +367,22 @@ export default function RequestSpecificationTabs({
                     <option value="multipart/form-data">multipart/form-data</option>
                     <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
                   </select>
+                </div>
+
+                {/* Body Description */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Body Description</label>
+                  <input
+                    type="text"
+                    value={bodyDescription}
+                    onChange={(e) => onBodyDescriptionChange?.(e.target.value)}
+                    disabled={readOnly}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Describe what this request body represents (e.g., User object, Pet data)"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Optional description of the request body purpose
+                  </p>
                 </div>
                 {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
                   // Form data / URL-encoded fields - Use FieldEditor
