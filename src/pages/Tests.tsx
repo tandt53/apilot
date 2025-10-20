@@ -8,6 +8,7 @@ import {
     FolderClosed,
     FolderOpen,
     Loader2,
+    Plus,
     RefreshCw,
     Search,
     Trash2,
@@ -15,21 +16,26 @@ import {
 } from 'lucide-react'
 import * as api from '@/lib/api'
 import {deleteTestCasesBySpec} from '@/lib/api/testCases'
-import RequestTester, {SessionState} from '@/components/RequestTester'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
 import SaveCancelButtons from '@/components/SaveCancelButtons'
 import Button from '@/components/Button'
+import StepEditor from '@/components/StepEditor'
 import {useEnvironments} from '@/lib/hooks'
-import type {Spec, TestCase} from '@/types/database'
+import type {Spec, TestCase, TestStep} from '@/types/database'
 
 // Group tests by spec
 interface TestGroup {
   spec: Spec
   singleTests: TestCase[]
   workflowTests: TestCase[]
+}
+
+// Session state interface
+interface SessionState {
+  [key: string]: any
 }
 
 // Helper functions for session management
@@ -53,7 +59,8 @@ const loadSession = (testId: number, stepIndex?: number): Partial<SessionState> 
   }
 }
 
-const saveSession = (testId: number, session: SessionState, stepIndex?: number) => {
+// @ts-expect-error unused for now
+const saveSession = (testId: number, session: any, stepIndex?: number) => {
   try {
     console.log('[Tests] Saving session for test', testId, ':', session)
     localStorage.setItem(getSessionKey(testId, stepIndex), JSON.stringify(session))
@@ -88,6 +95,7 @@ export default function Tests() {
     return saved ? new Set(JSON.parse(saved)) : new Set()
   })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  // @ts-expect-error unused for now
   const [saveHandler, setSaveHandler] = useState<(() => Promise<void>) | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedSpecId, setSelectedSpecId] = useState<number | null>(() => {
@@ -101,7 +109,12 @@ export default function Tests() {
   const [originalTestName, setOriginalTestName] = useState('')
   const [originalTestDescription, setOriginalTestDescription] = useState('')
 
+  // Steps state for unified view
+  const [steps, setSteps] = useState<TestStep[]>([])
+  const [originalSteps, setOriginalSteps] = useState<TestStep[]>([])
+
   // Memoized callback for handling changes
+  // @ts-expect-error unused for now
   const handleHasChanges = useCallback((hasChanges: boolean, handler: () => Promise<void>) => {
     console.log('[Tests] handleHasChanges called with:', hasChanges);
     setHasUnsavedChanges(hasChanges);
@@ -257,11 +270,13 @@ export default function Tests() {
   )
 
   // Memoize session to avoid recreating on every render
+  // @ts-expect-error unused for now
   const initialSessionForSingleTest = useMemo(
     () => selectedTest?.id ? loadSession(selectedTest.id) : undefined,
     [selectedTest?.id]
   )
 
+  // @ts-expect-error unused for now
   const initialSessionForWorkflowStep = useMemo(
     () => selectedTest?.id && selectedStepIndex !== null ? loadSession(selectedTest.id, selectedStepIndex) : undefined,
     [selectedTest?.id, selectedStepIndex]
@@ -290,28 +305,62 @@ export default function Tests() {
     }
   }, [isGenerating, generatingSpecId])
 
-  // Sync test name and description when selectedTest changes
+  // Sync test name, description, and steps when selectedTest changes
   useEffect(() => {
     if (selectedTest) {
       setTestName(selectedTest.name)
       setTestDescription(selectedTest.description || '')
       setOriginalTestName(selectedTest.name)
       setOriginalTestDescription(selectedTest.description || '')
+
+      // Convert test to steps format
+      if (selectedTest.testType === 'single') {
+        // Single test: create one step from test data
+        const singleStep: TestStep = {
+          id: selectedTest.id?.toString() || crypto.randomUUID(),
+          order: 1,
+          name: selectedTest.name,
+          description: selectedTest.description || '',
+          sourceEndpointId: selectedTest.sourceEndpointId,
+          currentEndpointId: selectedTest.currentEndpointId,
+          isCustomEndpoint: selectedTest.isCustomEndpoint,
+          method: selectedTest.method,
+          path: selectedTest.path,
+          pathVariables: selectedTest.pathVariables || {},
+          queryParams: selectedTest.queryParams || {},
+          headers: selectedTest.headers || {},
+          body: selectedTest.body,
+          assertions: selectedTest.assertions || [],
+          extractVariables: [],
+          delayBefore: 0,
+          delayAfter: 0,
+          skipOnFailure: false,
+          continueOnFailure: false,
+        }
+        setSteps([singleStep])
+        setOriginalSteps([singleStep])
+      } else {
+        // Workflow test: use existing steps
+        setSteps(selectedTest.steps || [])
+        setOriginalSteps(selectedTest.steps || [])
+      }
     } else {
       setTestName('')
       setTestDescription('')
       setOriginalTestName('')
       setOriginalTestDescription('')
+      setSteps([])
     }
   }, [selectedTest?.id])
 
-  // Track changes in name/description
+  // Track changes in name/description/steps
   const [hasHeaderChanges, setHasHeaderChanges] = useState(false)
   useEffect(() => {
     const nameChanged = testName !== originalTestName
     const descChanged = testDescription !== originalTestDescription
-    setHasHeaderChanges(nameChanged || descChanged)
-  }, [testName, testDescription, originalTestName, originalTestDescription])
+    const stepsChanged = JSON.stringify(steps) !== JSON.stringify(originalSteps)
+    setHasHeaderChanges(nameChanged || descChanged || stepsChanged)
+  }, [testName, testDescription, originalTestName, originalTestDescription, steps, originalSteps])
 
   // Combine header changes with request changes
   useEffect(() => {
@@ -495,6 +544,7 @@ export default function Tests() {
     }
   }
 
+  // @ts-expect-error unused for now
   const handleStepUpdate = async (testId: number, stepIndex: number, updates: any) => {
     try {
       // Get current test case
@@ -1081,25 +1131,38 @@ export default function Tests() {
                           const updates: any = {}
 
                           // Save name/description changes
-                          if (hasHeaderChanges) {
-                            if (testName !== originalTestName) {
-                              updates.name = testName
-                            }
-                            if (testDescription !== originalTestDescription) {
-                              updates.description = testDescription
+                          if (testName !== originalTestName) {
+                            updates.name = testName
+                          }
+                          if (testDescription !== originalTestDescription) {
+                            updates.description = testDescription
+                          }
+
+                          // Save steps changes
+                          if (JSON.stringify(steps) !== JSON.stringify(originalSteps)) {
+                            if (selectedTest.testType === 'single' && steps.length > 0) {
+                              // For single tests, update test data from the first step
+                              const step = steps[0]
+                              updates.method = step.method
+                              updates.path = step.path
+                              updates.pathVariables = step.pathVariables
+                              updates.queryParams = step.queryParams
+                              updates.headers = step.headers
+                              updates.body = step.body
+                              updates.assertions = step.assertions
+                              updates.extractVariables = step.extractVariables
+                            } else {
+                              // For workflow tests, update steps array
+                              updates.steps = steps
                             }
                           }
 
-                          // Save request changes via RequestTester's save handler
-                          if (saveHandler) {
-                            await saveHandler()
-                          }
-
-                          // Save header changes if any
+                          // Save changes if any
                           if (Object.keys(updates).length > 0 && selectedTest) {
                             await handleTestUpdate(selectedTest.id!, updates)
                             setOriginalTestName(testName)
                             setOriginalTestDescription(testDescription)
+                            setOriginalSteps(steps)
                           }
 
                           // Reset change tracking
@@ -1124,256 +1187,58 @@ export default function Tests() {
                 </div>
               </div>
 
-              {/* Test Details */}
-              {selectedTest.testType === 'single' ? (
-                /* Single Test View - Use RequestTester with Canonical Format */
-                (() => {
-                  // Determine content type from headers
-                  const contentType = selectedTest.headers?.['Content-Type'] ||
-                                     selectedTest.headers?.['content-type'] ||
-                                     'application/json'
-
-                  // Build canonical request body
-                  let body = undefined
-                  if (selectedTest.body) {
-                    if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-                      // For form data, create fields array
-                      const fields: any[] = []
-                      if (typeof selectedTest.body === 'object') {
-                        Object.entries(selectedTest.body).forEach(([key, value]) => {
-                          // Detect file fields
-                          if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
-                            fields.push({
-                              name: key,
-                              type: 'file',
-                              format: 'binary',
-                              required: false,
-                              example: value,
-                              description: 'File upload'
-                            })
-                          } else {
-                            fields.push({
-                              name: key,
-                              type: 'string',
-                              required: false,
-                              example: value
-                            })
-                          }
-                        })
-                      }
-                      body = {
-                        required: true,
-                        fields,
-                        example: undefined  // No JSON example for form data
-                      }
-                    } else {
-                      // For JSON or other types, just provide example
-                      body = {
-                        required: true,
-                        example: selectedTest.body
-                      }
-                    }
-                  }
-
-                  return (
-                    <RequestTester
-                      key={selectedTest.id}
-                      endpoint={{
-                        method: selectedTest.method,
-                        path: selectedTest.path,
-                        name: selectedTest.description || selectedTest.name,
-                        request: {
-                          contentType,
-                          parameters: [
-                            // Convert path variables to canonical parameters
-                            ...Object.keys(selectedTest.pathVariables || {}).map(key => ({
-                              name: key,
-                              in: 'path' as const,
-                              type: 'string',
-                              required: true,
-                              example: selectedTest.pathVariables![key]
-                            })),
-                            // Convert query params to canonical parameters
-                            ...Object.keys(selectedTest.queryParams || {}).map(key => ({
-                              name: key,
-                              in: 'query' as const,
-                              type: 'string',
-                              required: false,
-                              example: selectedTest.queryParams![key]
-                            }))
-                          ],
-                          body
-                        },
-                        // Current test assertions (will be used as initial state)
-                        assertions: selectedTest.assertions
-                      } as any}
-                      testCase={selectedTest}
-                      onTestUpdate={(updates) => handleTestUpdate(selectedTest.id!, updates)}
-                      onHasChanges={handleHasChanges}
-                      showSaveButton={false}
-                      readOnly={false}
-                      specId={String(selectedTest.specId)}
-                      selectedEnv={selectedEnv}
-                      environments={environments}
-                      selectedEnvId={selectedEnvId}
-                      onEnvChange={setSelectedEnvId}
-                      initialSession={initialSessionForSingleTest}
-                      onSessionChange={(session) => saveSession(selectedTest.id!, session)}
-                      defaultAssertions={selectedTest.assertions}
-                    />
-                  )
-                })()
-              ) : (
-                /* Workflow Test View */
-                <div className="space-y-4">
-                  {/* Steps List */}
-                  <div className="bg-white border border-gray-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-gray-900 mb-4">
-                      Workflow Steps ({selectedTest.steps?.length || 0})
+              {/* Test Details - Unified Steps View */}
+              <div className="bg-white border border-gray-200 rounded-lg">
+                {/* Steps Header */}
+                <div className="border-b border-gray-200 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Steps ({steps.length})
                     </h3>
-                    <div className="space-y-2">
-                      {selectedTest.steps?.map((step, idx) => (
-                        <button
-                          key={step.id}
-                          onClick={() => setSelectedStepIndex(selectedStepIndex === idx ? null : idx)}
-                          className={`w-full border rounded-lg p-4 text-left transition-colors ${
-                            selectedStepIndex === idx
-                              ? 'border-purple-300 bg-purple-50'
-                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="flex items-center justify-center w-6 h-6 bg-purple-600 text-white text-xs font-bold rounded-full">
-                              {step.order}
-                            </span>
-                            <h4 className="font-medium text-gray-900">{step.name}</h4>
-                            <code className="text-xs text-gray-600">{step.method} {step.path}</code>
-                          </div>
-                          {step.description && (
-                            <p className="text-sm text-gray-600 mb-2 ml-9">{step.description}</p>
-                          )}
-                          <div className="ml-9 text-xs text-gray-500">
-                            {step.assertions.length} assertions • Click to test
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Selected Step Detail */}
-                  {selectedStepIndex !== null && selectedTest.steps && selectedTest.steps[selectedStepIndex] && (
-                    <div className="bg-white border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-gray-900">
-                          Step {selectedTest.steps[selectedStepIndex].order}: {selectedTest.steps[selectedStepIndex].name}
-                        </h3>
-                        <button
-                          onClick={() => setSelectedStepIndex(null)}
-                          className="text-gray-400 hover:text-gray-600"
-                        >
-                          <X size={20} />
-                        </button>
-                      </div>
-                      {(() => {
-                        const step = selectedTest.steps![selectedStepIndex]
-
-                        // Determine content type from headers
-                        const contentType = step.headers?.['Content-Type'] ||
-                                           step.headers?.['content-type'] ||
-                                           'application/json'
-
-                        // Build canonical request body
-                        let body = undefined
-                        if (step.body) {
-                          if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-                            // For form data, create fields array
-                            const fields: any[] = []
-                            if (typeof step.body === 'object') {
-                              Object.entries(step.body).forEach(([key, value]) => {
-                                // Detect file fields
-                                if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
-                                  fields.push({
-                                    name: key,
-                                    type: 'string',
-                                    format: 'binary',
-                                    required: false,
-                                    example: undefined,
-                                    description: 'File upload'
-                                  })
-                                } else {
-                                  fields.push({
-                                    name: key,
-                                    type: 'string',
-                                    required: false,
-                                    example: value
-                                  })
-                                }
-                              })
-                            }
-                            body = {
-                              required: true,
-                              fields,
-                              example: undefined  // No JSON example for form data
-                            }
-                          } else {
-                            // For JSON or other types, just provide example
-                            body = {
-                              required: true,
-                              example: step.body
-                            }
-                          }
+                    <button
+                      onClick={() => {
+                        const newStep: TestStep = {
+                          id: crypto.randomUUID(),
+                          order: steps.length + 1,
+                          name: `Step ${steps.length + 1}`,
+                          description: '',
+                          sourceEndpointId: undefined,
+                          currentEndpointId: undefined,
+                          isCustomEndpoint: true,
+                          method: 'GET',
+                          path: '/',
+                          pathVariables: {},
+                          queryParams: {},
+                          headers: {},
+                          body: undefined,
+                          assertions: [],
+                          extractVariables: [],
+                          delayBefore: 0,
+                          delayAfter: 0,
+                          skipOnFailure: false,
+                          continueOnFailure: false,
                         }
-
-                        return (
-                          <RequestTester
-                            key={step.id || `step-${selectedStepIndex}`}
-                            endpoint={{
-                              method: step.method,
-                              path: step.path,
-                              name: step.description || step.name,
-                              request: {
-                                contentType,
-                                parameters: [
-                                  // Convert path variables to canonical parameters
-                                  ...Object.keys(step.pathVariables || {}).map(key => ({
-                                    name: key,
-                                    in: 'path' as const,
-                                    type: 'string',
-                                    required: true,
-                                    example: step.pathVariables![key]
-                                  })),
-                                  // Convert query params to canonical parameters
-                                  ...Object.keys(step.queryParams || {}).map(key => ({
-                                    name: key,
-                                    in: 'query' as const,
-                                    type: 'string',
-                                    required: false,
-                                    example: step.queryParams![key]
-                                  }))
-                                ],
-                                body
-                              },
-                              assertions: step.assertions
-                            } as any}
-                            testCase={step}
-                            onTestUpdate={(updates) => handleStepUpdate(selectedTest.id!, selectedStepIndex, updates)}
-                            onHasChanges={handleHasChanges}
-                            showSaveButton={false}
-                            readOnly={false}
-                            specId={String(selectedTest.specId)}
-                            selectedEnv={selectedEnv}
-                            environments={environments}
-                            selectedEnvId={selectedEnvId}
-                            onEnvChange={setSelectedEnvId}
-                            initialSession={initialSessionForWorkflowStep}
-                            onSessionChange={(session) => saveSession(selectedTest.id!, session, selectedStepIndex)}
-                          />
-                        )
-                      })()}
-                    </div>
-                  )}
+                        setSteps([...steps, newStep])
+                      }}
+                      className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                      title="Add step"
+                    >
+                      <Plus size={20} />
+                    </button>
+                  </div>
                 </div>
-              )}
+
+                {/* Steps Content */}
+                <div className="p-4">
+                  <StepEditor
+                    steps={steps}
+                    onStepsChange={setSteps}
+                    environment={selectedEnv}
+                    mode="edit"
+                    specId={String(selectedTest.specId)}
+                  />
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

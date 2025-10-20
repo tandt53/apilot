@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react'
-import {Code2, Info, Loader2, Play} from 'lucide-react'
+import {Code2, Info, Loader2, Play, ListOrdered} from 'lucide-react'
 import VariableInput from './VariableInput'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import ResponseDisplay from './ResponseDisplay'
@@ -823,6 +823,110 @@ export default function RequestTester({
                 initialActiveTab={activeResponseTab}
                 onActiveTabChange={setActiveResponseTab}
             />
+
+            {/* Multi-Step Execution Results */}
+            {response?.stepResults && response.stepResults.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg">
+                    <div className="border-b border-gray-200 px-4 py-3">
+                        <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                            <ListOrdered size={20} className="text-purple-600"/>
+                            Step Execution Results
+                        </h3>
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                        {response.stepResults.map((stepResult: any) => (
+                            <div key={stepResult.stepId} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                                {/* Step Header */}
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-gray-900">
+                                            Step {stepResult.stepOrder}: {stepResult.stepName}
+                                        </span>
+                                        {stepResult.response && (
+                                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                                                stepResult.response.statusCode >= 200 && stepResult.response.statusCode < 300
+                                                    ? 'bg-green-100 text-green-700'
+                                                    : 'bg-red-100 text-red-700'
+                                            }`}>
+                                                {stepResult.response.statusCode}
+                                            </span>
+                                        )}
+                                        {stepResult.duration && (
+                                            <span className="text-xs text-gray-500">
+                                                {stepResult.duration}ms
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Extracted Variables */}
+                                {stepResult.extractedVariables && Object.keys(stepResult.extractedVariables).length > 0 && (
+                                    <div className="mb-3">
+                                        <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                                            📤 Extracted Variables
+                                        </h4>
+                                        <div className="bg-white border border-gray-200 rounded p-2">
+                                            <table className="w-full text-xs">
+                                                <thead>
+                                                    <tr className="border-b border-gray-200">
+                                                        <th className="text-left py-1 px-2 font-semibold text-gray-700">Variable</th>
+                                                        <th className="text-left py-1 px-2 font-semibold text-gray-700">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {Object.entries(stepResult.extractedVariables).map(([key, value]) => (
+                                                        <tr key={key} className="border-b border-gray-100 last:border-0">
+                                                            <td className="py-1 px-2 font-mono text-purple-600">{key}</td>
+                                                            <td className="py-1 px-2 font-mono text-gray-800">
+                                                                {typeof value === 'object'
+                                                                    ? JSON.stringify(value)
+                                                                    : String(value)
+                                                                }
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Assertion Results */}
+                                {stepResult.assertionResults && stepResult.assertionResults.length > 0 && (
+                                    <div>
+                                        <h4 className="text-xs font-semibold text-gray-700 mb-2">
+                                            ✓ Assertions ({stepResult.assertionResults.filter((a: any) => a.passed).length}/{stepResult.assertionResults.length} passed)
+                                        </h4>
+                                        <div className="space-y-1">
+                                            {stepResult.assertionResults.map((result: any, i: number) => (
+                                                <div
+                                                    key={i}
+                                                    className={`text-xs px-2 py-1 rounded flex items-center gap-2 ${
+                                                        result.passed
+                                                            ? 'bg-green-50 text-green-700'
+                                                            : 'bg-red-50 text-red-700'
+                                                    }`}
+                                                >
+                                                    <span>{result.passed ? '✓' : '✗'}</span>
+                                                    <span>{result.error || 'Passed'}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Error */}
+                                {stepResult.error && (
+                                    <div className="bg-red-50 border border-red-200 rounded p-2 mt-2">
+                                        <p className="text-xs text-red-700 font-mono">{stepResult.error}</p>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Assertions Section */}
             <AssertionsSection

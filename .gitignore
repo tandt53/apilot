@@ -85,3 +85,7 @@ secrets.json
 
 # Electron user data directories
 Apilot/
+
+# Component documentation (auto-generated, not committed)
+src/components/README.md
+docs/COMPONENTS.md

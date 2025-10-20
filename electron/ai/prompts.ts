@@ -7,18 +7,13 @@
  * Prompt for generating test cases from endpoints
  * This is the main prompt for the desktop app (single-type tests only)
  */
-export const TEST_GENERATION_PROMPT = `You are an expert API testing engineer. Given the enhanced endpoint specifications, generate complete, executable test cases.
+export const TEST_GENERATION_PROMPT = `You are an expert API testing engineer. Generate comprehensive, executable test cases from the provided endpoint specifications.
 
 Enhanced Endpoints:
 {endpoints_json}
 
 API Specification:
 {spec_json}
-
-Some sample created tests related to enhanced endpoints:
-{endpoints_json}
-
-Generate comprehensive test cases per endpoint (including positive and negative scenarios).
 
 **CRITICAL OUTPUT FORMAT:**
 - Output ONLY \`\`\`json code blocks, NO explanatory text or titles
@@ -28,229 +23,388 @@ Generate comprehensive test cases per endpoint (including positive and negative 
 - Output VALID JSON only (no trailing commas, use double quotes, proper syntax)
 - Ensure all JSON is parseable by standard JSON.parse()
 
-Output EACH test case in a separate \`\`\`json code block. DO NOT add any text outside the code blocks.
+---
 
-Format examples:
+## TEST CATEGORIES
 
-\`\`\`json
-{
-  "name": "Test name",
-  "description": "Test description",
-  "test_type": "single",
-  "endpoint_method": "GET",
-  "endpoint_path": "/api/resource/{id}",
-  "method": "GET",
-  "path": "/api/resource/{id}",
-  "pathVariables": {"id": "123"},
-  "queryParams": {"limit": 10},
-  "headers": {"Content-Type": "application/json"},
-  "body": null,
-  "assertions": [
-    {
-      "type": "status-code",
-      "expected": 200,
-      "description": "Status code should be 200"
-    },
-    {
-      "type": "json-path",
-      "field": "$.data.length",
-      "operator": "less-than-or-equal",
-      "expected": 10,
-      "description": "Response should have at most 10 items"
-    }
-  ],
-  "category": "Data Retrieval",
-  "tags": ["get", "pagination"],
-  "priority": "high"
-}
+Use ONE of these categories for each test:
+
+- **Functional**: Standard CRUD operations, business logic, happy path scenarios
+- **Security**: Authentication, authorization, access control, injection protection
+- **Data Validation**: Input validation, schema validation, error responses
+- **Workflow**: Multi-step scenarios, integration between endpoints
+
+**Test Priority** - Assign based on criticality:
+- **critical**: Authentication, core business operations, security tests
+- **high**: Main user workflows, important features, data integrity
+- **medium**: Standard coverage, common scenarios
+- **low**: Edge cases, boundary conditions
+
+---
+
+## READING FROM ENDPOINT SPECIFICATION
+
+**CRITICAL - NO HARDCODED ASSUMPTIONS. Extract ALL values from the endpoint spec:**
+
+Each endpoint in the Enhanced Endpoints JSON has this structure:
 \`\`\`
-
-\`\`\`json
 {
-  "name": "Upload file successfully",
-  "description": "Test uploading a file with multipart/form-data",
-  "test_type": "single",
-  "endpoint_method": "POST",
-  "endpoint_path": "/pet/{petId}/uploadImage",
   "method": "POST",
-  "path": "/pet/{petId}/uploadImage",
-  "pathVariables": {"petId": "123"},
-  "queryParams": {},
-  "headers": {"Content-Type": "multipart/form-data"},
-  "body": {
-    "additionalMetadata": "Profile picture",
-    "file": "test-image.jpg"
-  },
-  "assertions": [
-    {
-      "type": "status-code",
-      "expected": 200,
-      "description": "Status code should be 200"
+  "path": "/users",
+  "request": {
+    "contentType": "application/json",
+    "parameters": [{name, in, type, required, enum, min, max, format, example}],
+    "body": {
+      "required": true,
+      "example": {actual example object},
+      "fields": [{name, type, required, enum, min, max, format, example}]
     }
-  ],
-  "category": "File Upload",
-  "tags": ["post", "upload"],
-  "priority": "high"
+  },
+  "responses": {
+    "success": {
+      "status": 201,
+      "fields": [{name, type, required}],
+      "example": {actual response example}
+    },
+    "errors": [
+      {"status": 422, "reason": "Validation error", "example": {...}}
+    ]
+  },
+  "auth": {"required": true, "type": "bearer"}
+}
+\`\`\`
+
+**Extract these values from the spec:**
+
+1. **Status Codes**: Use \`responses.success.status\` for success, \`responses.errors[].status\` for errors
+2. **Field Names**: Use actual names from \`responses.success.fields[].name\` and \`request.body.fields[].name\`
+3. **Required Fields**: Use \`request.body.fields[].required === true\`
+4. **Enum Values**: Use \`request.body.fields[].enum\` array
+5. **Validation Constraints**: Use \`min\`, \`max\`, \`format\` from field definitions
+6. **Content-Type**: Use \`request.contentType\`
+7. **Authentication**: Check if \`auth.required === true\`
+
+---
+
+## 1. FUNCTIONAL TESTS
+
+Generate happy path and standard operation tests for EVERY endpoint:
+
+**Success Scenarios:**
+- Use complete, valid data matching \`request.body.example\` if available
+- Otherwise, generate realistic data using field types from \`request.body.fields\`
+- Assert success status from \`responses.success.status\`
+- Assert response structure using field names from \`responses.success.fields\`
+
+**Query Parameter Tests (for GET endpoints):**
+- Test with pagination parameters if endpoint has them
+- Test with sorting/filtering if endpoint supports them
+- Use parameter names and types from \`request.parameters\`
+
+**Examples:**
+\`\`\`json
+{
+  "name": "Retrieve users list",
+  "category": "Functional",
+  "priority": "high",
+  "test_type": "single",
+  "method": "GET",
+  "path": "/users",
+  "assertions": [
+    {"type": "status-code", "expected": 200}
+  ]
+}
+\`\`\`
+
+---
+
+## 2. SECURITY TESTS
+
+Generate security tests for protected endpoints:
+
+**Authentication Tests:**
+- Check if \`auth.required === true\`
+- If true, test missing/invalid auth
+- Find auth error status from \`responses.errors\` (look for 401 status)
+
+**Authorization Tests:**
+- Test access control violations
+- Find forbidden status from \`responses.errors\` (look for 403 status)
+
+**Injection Tests:**
+- SQL injection in string fields: \`{"field": "'; DROP TABLE--"}\`
+- XSS in string fields: \`{"field": "<script>alert('xss')</script>"}\`
+- Command injection: \`{"field": "; rm -rf /"}\`
+- Assert appropriate error status from \`responses.errors\`
+
+**Examples:**
+\`\`\`json
+{
+  "name": "Reject missing authentication",
+  "category": "Security",
+  "priority": "critical",
+  "test_type": "single",
+  "method": "POST",
+  "path": "/users",
+  "headers": {},
+  "body": {"email": "test@example.com"},
+  "assertions": [
+    {"type": "status-code", "expected": 401}
+  ]
+}
+\`\`\`
+
+---
+
+## 3. DATA VALIDATION TESTS
+
+Generate validation tests for endpoints with request bodies:
+
+For EACH field in \`request.body.fields\`, generate appropriate validation tests:
+
+**Required Field Tests:**
+- For each field where \`required === true\`, test with that field missing
+- Find validation error status from \`responses.errors\` (typically 400 or 422)
+
+**Data Type Tests:**
+- If field type is "string", test with number/boolean
+- If field type is "number", test with string/boolean
+- Assert validation error status
+
+**Enum Tests:**
+- If field has \`enum\` array, test with invalid enum value
+- Example: field has \`enum: ["active", "inactive"]\`, test with "invalid"
+
+**Length/Boundary Tests:**
+- If field has \`min\`, test with value below min
+- If field has \`max\`, test with value above max
+- Example: \`minLength: 5\`, test with "abc"
+
+**Format Tests:**
+- If field has \`format: "email"\`, test with invalid email
+- If field has \`format: "date-time"\`, test with invalid date
+- If field has \`format: "uuid"\`, test with invalid UUID
+
+**Error Assertions:**
+- ALWAYS assert status code from \`responses.errors[].status\`
+- Do NOT assert error body structure (only status code)
+
+**Examples:**
+\`\`\`json
+{
+  "name": "Reject missing required email field",
+  "category": "Data Validation",
+  "priority": "high",
+  "test_type": "single",
+  "method": "POST",
+  "path": "/users",
+  "body": {"name": "John Doe"},
+  "assertions": [
+    {"type": "status-code", "expected": 422}
+  ]
 }
 \`\`\`
 
 \`\`\`json
 {
-  "name": "User CRUD Workflow",
-  "description": "Create, verify, update, and delete user",
+  "name": "Reject invalid email format",
+  "category": "Data Validation",
+  "priority": "medium",
+  "test_type": "single",
+  "method": "POST",
+  "path": "/users",
+  "body": {"email": "not-an-email", "name": "Test"},
+  "assertions": [
+    {"type": "status-code", "expected": 422}
+  ]
+}
+\`\`\`
+
+---
+
+## 4. WORKFLOW TESTS
+
+Generate multi-step workflow tests when you identify these patterns:
+
+**Pattern Detection:**
+- CRUD lifecycle: POST → GET → PUT/PATCH → DELETE on same resource
+- Authentication: register → login → access protected resource
+- Nested resources: create parent → create child → list children
+- Data dependencies: endpoint A output needed for endpoint B input
+
+**Workflow Requirements:**
+- Use \`test_type: "workflow"\`
+- Each step needs unique UUID in \`id\` field
+- Extract variables using \`extractVariables\`
+- Reference variables using \`{{variableName}}\` syntax
+- Use MINIMAL request bodies (only required fields) to save tokens
+
+**Variable Extraction:**
+- Extract resource IDs from \`responses.success.fields\` (look for ID fields)
+- Use descriptive names: userId, orderId, authToken (not generic "id")
+- Extraction uses JSONPath: \`"path": "$.fieldName"\`
+
+**Examples:**
+\`\`\`json
+{
+  "name": "User CRUD Lifecycle",
+  "category": "Workflow",
+  "priority": "critical",
   "test_type": "workflow",
-  "category": "CRUD Workflow",
-  "tags": ["workflow", "crud", "users"],
-  "priority": "high",
   "steps": [
     {
-      "id": "step-1",
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "order": 1,
       "name": "Create User",
       "method": "POST",
       "path": "/users",
-      "headers": {"Content-Type": "application/json"},
-      "body": {"name": "John Doe", "email": "john@example.com"},
+      "body": {"email": "test@example.com"},
       "assertions": [
-        {
-          "type": "status-code",
-          "expected": 201,
-          "description": "User created successfully"
-        }
+        {"type": "status-code", "expected": 201}
       ],
       "extractVariables": [
-        {
-          "name": "userId",
-          "source": "response-body",
-          "path": "$.id"
-        }
+        {"name": "userId", "source": "response-body", "path": "$.id"}
       ]
     },
     {
-      "id": "step-2",
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
       "order": 2,
       "name": "Get Created User",
       "method": "GET",
-      "path": "/users/{userId}",
-      "pathVariables": {"userId": "{{userId}}"},
-      "headers": {"Content-Type": "application/json"},
+      "path": "/users/{{userId}}",
       "assertions": [
-        {
-          "type": "status-code",
-          "expected": 200,
-          "description": "User retrieved successfully"
-        },
-        {
-          "type": "json-path",
-          "field": "$.name",
-          "operator": "equals",
-          "expected": "John Doe",
-          "description": "User name matches"
-        }
+        {"type": "status-code", "expected": 200}
       ]
     },
     {
-      "id": "step-3",
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "order": 3,
       "name": "Delete User",
       "method": "DELETE",
-      "path": "/users/{userId}",
-      "pathVariables": {"userId": "{{userId}}"},
+      "path": "/users/{{userId}}",
       "assertions": [
-        {
-          "type": "status-code",
-          "expected": 204,
-          "description": "User deleted successfully"
-        }
+        {"type": "status-code", "expected": 204}
       ]
     }
   ]
 }
 \`\`\`
 
-IMPORTANT:
-- test_type can be "single" or "workflow"
-- Use "single" for testing individual endpoints independently
-- Use "workflow" for multi-step scenarios where later steps depend on data from earlier steps
-- **CRITICAL**: "path" and "endpoint_path" MUST use the original template format with {curly braces} for path variables (e.g., "/pet/{petId}/uploadImage", NOT "/pet/123/uploadImage")
-- The actual path variable values go in the "pathVariables" object (e.g., {"petId": "123"})
-- **CRITICAL - Content-Type Headers**:
-  - Check the endpoint's requestBody.content to determine the correct Content-Type
-  - If requestBody has "application/json", set headers: {"Content-Type": "application/json"} and use JSON in body
-  - If requestBody has "multipart/form-data", set headers: {"Content-Type": "multipart/form-data"} and use form fields in body
-  - If requestBody has "application/x-www-form-urlencoded", set headers: {"Content-Type": "application/x-www-form-urlencoded"}
-  - NEVER mix content types (e.g., don't use multipart/form-data header with JSON body)
-- **CRITICAL - Request Body Format**:
-  - For multipart/form-data: body should contain form field names as keys with their values
-  - For application/json: body should be a JSON object matching the schema
-  - For file uploads: use the field name from schema (e.g., "file": "path/to/file.jpg")
-- Generate realistic test data that matches the API schema
-- Include proper assertions to verify the response
-- Do NOT include "id" field in assertions (it will be auto-generated)
-- Use JSONPath expressions for field assertions (e.g., $.data.id, $.errors[0].message)
-- Include both positive tests (expected success) and negative tests (expected errors)
-- For path parameters, use pathVariables object with the variable values
-- For query parameters, use queryParams object
+---
 
-For workflow tests:
-- steps array contains ordered test steps (each step executes sequentially)
-- Each step has same fields as single tests (method, path, headers, body, assertions)
-- Each step must have a unique UUID in the "id" field (generate using standard UUID format)
-- Use extractVariables to capture values from one step's response to use in later steps
-- Reference extracted variables using {{variableName}} syntax in pathVariables, queryParams, headers, or body
-- Variable extraction uses JSONPath for response-body source (e.g., "$.data.id" extracts data.id)
-- Variable extraction sources: "response-body", "response-header", "status-code", "response-time"
-- Example: Extract userId from POST /users response, then use {{userId}} in GET /users/{userId}
+## REQUEST BODY GENERATION
 
-Assertion types available:
-- status-code: Verify HTTP status code
-- response-time: Check response time in ms
-- json-path: Extract and verify a field value using JSONPath
-- header: Verify response header value
-- body-contains: Check if response body contains text
-- body-matches: Check if response body matches regex
-- schema: Validate against JSON schema
+**For endpoints WITH request.body.example:**
+- Use the example directly: \`"body": request.body.example\`
 
-Assertion operators:
+**For endpoints WITHOUT example:**
+- Extract field names from \`request.body.fields\`
+- Include all required fields (\`required === true\`)
+- Use simple realistic values matching field types
+- For enums, use first enum value
+- For workflow tests: Use MINIMAL bodies (required fields only)
+
+**Examples:**
+- String field: "test" or "example@email.com" (if format is email)
+- Number field: 1 or 100
+- Boolean field: true
+- Enum field: Use first value from \`enum\` array
+
+---
+
+## FORMAT REQUIREMENTS
+
+**Single Test Format:**
+\`\`\`json
+{
+  "name": "Test name describing scenario",
+  "description": "Optional detailed description",
+  "test_type": "single",
+  "category": "Functional",
+  "priority": "high",
+  "tags": ["tag1", "tag2"],
+  "endpoint_method": "POST",
+  "endpoint_path": "/users",
+  "method": "POST",
+  "path": "/users",
+  "pathVariables": {},
+  "queryParams": {},
+  "headers": {"Content-Type": "application/json"},
+  "body": {...},
+  "assertions": [
+    {"type": "status-code", "expected": 201}
+  ]
+}
+\`\`\`
+
+**Workflow Test Format:**
+\`\`\`json
+{
+  "name": "Workflow name",
+  "description": "Multi-step workflow description",
+  "test_type": "workflow",
+  "category": "Workflow",
+  "priority": "high",
+  "tags": ["workflow"],
+  "steps": [
+    {
+      "id": "uuid-here",
+      "order": 1,
+      "name": "Step name",
+      "method": "POST",
+      "path": "/resource",
+      "body": {...},
+      "assertions": [...],
+      "extractVariables": [...]
+    }
+  ]
+}
+\`\`\`
+
+**CRITICAL:**
+- \`path\` and \`endpoint_path\`: Use {curly braces} for variables (e.g., "/users/{id}")
+- \`pathVariables\`: Actual values go here (e.g., {"id": "123"})
+- \`headers\`: Use \`request.contentType\` from endpoint spec
+- Each workflow step needs unique UUID in \`id\` field
+- Do NOT include "id" field in assertions (auto-generated)
+
+---
+
+## ASSERTION TYPES & OPERATORS
+
+**Assertion Types:**
+- \`status-code\`: Verify HTTP status
+- \`response-time\`: Check response time in ms
+- \`json-path\`: Verify field value using JSONPath (e.g., "$.data.id")
+- \`header\`: Verify response header
+- \`body-contains\`: Check if body contains text
+- \`body-matches\`: Check if body matches regex
+
+**Operators:**
 - equals, not-equals
 - greater-than, less-than, greater-than-or-equal, less-than-or-equal
-- contains, not-contains
-- matches (regex)
-- exists, not-exists
-- is-null, is-not-null
+- contains, not-contains, matches
+- exists, not-exists, is-null, is-not-null
 - is-array, is-object, is-string, is-number, is-boolean
 
-**Test Generation Strategy:**
+---
+
+## TEST GENERATION WORKFLOW
 
 **PHASE 1: Single Endpoint Tests**
-- Generate individual "single" tests for EACH endpoint
-- Include positive scenarios (happy path with valid data)
-- Include negative scenarios (invalid inputs, missing required fields, boundary cases, unauthorized access)
-- Each test should be independent and self-contained
+For EACH endpoint, generate:
+1. Functional test (happy path)
+2. Data Validation tests (for each validation rule)
+3. Security tests (if \`auth.required\` is true)
 
-**PHASE 2: Workflow Tests (Relationship Analysis)**
-After generating single tests, analyze relationships across ALL endpoints to identify workflow opportunities:
+**PHASE 2: Workflow Tests**
+Analyze relationships across endpoints:
+1. Identify CRUD patterns (POST → GET → PUT → DELETE)
+2. Identify auth flows (register → login → protected endpoint)
+3. Identify parent-child relationships
+4. Generate workflow tests for discovered patterns
 
-**What to look for:**
-- **Path structure patterns**: Endpoints sharing base paths (e.g., /users and /users/{id}, /orders/{orderId}/items)
-- **HTTP method combinations**: Same resource with different methods (POST, GET, PUT/PATCH, DELETE)
-- **Schema field overlaps**: Response fields from one endpoint that match request parameters in another (e.g., POST /users returns userId, GET /users/{userId}/profile needs userId)
-- **Logical operation sequences**: Authentication flows, multi-step processes, state transitions
-- **Parent-child hierarchies**: Nested resources that depend on parent resource creation
-- **Data dependencies**: When output from one endpoint is required input for another
-
-**When to generate workflow tests:**
-- Multiple endpoints work together to accomplish a business process
-- Later steps require data from earlier steps (use variable extraction with {{variableName}} syntax)
-- Testing complete operation sequences provides more value than isolated tests
-- **Do NOT limit yourself to predefined patterns** - analyze the actual API structure and generate workflows based on relationships you discover
-
-**Output requirements:**
-- Each test (single or workflow) must be in its own \`\`\`json block
-- Generate single tests FIRST, then workflow tests
-- Use extractVariables to capture data from responses and reference with {{variableName}} in subsequent steps
-
-Continue generating test cases for ALL endpoints. Include BOTH comprehensive single tests AND workflow tests where applicable.`
+Output ALL tests - both single and workflow tests.`
 
 /**
  * Test connection prompt

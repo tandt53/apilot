@@ -235,6 +235,9 @@ export interface TestExecution {
   assertionResults: AssertionResult[]
   error?: string // Error message if status is "error"
 
+  // Multi-step test results
+  stepResults?: StepExecutionResult[]
+
   // Timing
   startedAt: Date
   completedAt?: Date
@@ -274,6 +277,23 @@ export interface AssertionResult {
   actual?: any // Actual value received
   expected?: any // Expected value
   message?: string // Error or success message
+}
+
+/**
+ * Step Execution Result - Result of single step in multi-step test
+ */
+export interface StepExecutionResult {
+  stepId: string // Links to TestStep.id
+  stepOrder: number // Step order number
+  stepName: string // Step name for display
+  request: ExecutionRequest // Actual request sent
+  response?: ExecutionResponse // Response received
+  assertionResults: AssertionResult[] // Assertions for this step
+  extractedVariables?: Record<string, any> // Variables extracted from response
+  error?: string // Error message if step failed
+  startedAt: Date // When step started
+  completedAt?: Date // When step completed
+  duration?: number // Step duration in milliseconds
 }
 
 // ============================================
