@@ -5,7 +5,14 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type GenerateTestsResult, type TestConnectionResult} from './base'
-import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
+import {
+  formatEndpointsForPrompt,
+  formatSpecForPrompt,
+  formatReferenceEndpointsForPrompt,
+  formatCustomRequirementsForPrompt,
+  TEST_CONNECTION_PROMPT,
+  TEST_GENERATION_PROMPT
+} from './prompts'
 
 export interface AnthropicConfig {
   apiKey: string
@@ -56,10 +63,47 @@ export class AnthropicService extends AIService {
         const content = response.content[0]
         const message = content.type === 'text' ? content.text : 'Connected successfully'
 
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability } = await import('./model-validator')
+
+        console.log('[Anthropic Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResponse = await this.client.messages.create({
+          model: this.model,
+          max_tokens: 500,
+          messages: [
+            {
+              role: 'user',
+              content: CAPABILITY_TEST_PROMPT,
+            },
+          ],
+        })
+
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResponse.content[0]?.type === 'text' ? capabilityResponse.content[0].text : ''
+
+        const capabilityResult = validateModelCapability(capabilityContent)
+
+        console.log('[Anthropic Service] Capability test result:', {
+          score: capabilityResult.score,
+          capable: capabilityResult.capable,
+          issues: capabilityResult.issues,
+          warnings: capabilityResult.warnings,
+          latency: capabilityLatency,
+        })
+
         return {
           success: true,
           message,
           latency,
+          capabilityTest: {
+            score: capabilityResult.score,
+            capable: capabilityResult.capable,
+            issues: capabilityResult.issues,
+            warnings: capabilityResult.warnings,
+            recommendation: capabilityResult.recommendation,
+          },
         }
       }
 
@@ -69,10 +113,19 @@ export class AnthropicService extends AIService {
         error: 'Empty response',
       }
     } catch (error: any) {
+      console.error('[Anthropic Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyAnthropicError } = await import('./error-detector')
+      const classified = classifyAnthropicError(error, this.model)
+
       return {
         success: false,
-        message: 'Failed to connect to Anthropic',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }
@@ -81,7 +134,7 @@ export class AnthropicService extends AIService {
    * Generate test cases from endpoints
    */
   async generateTests(options: GenerateTestsOptions): Promise<GenerateTestsResult> {
-    const { endpoints, spec, onProgress, onTestGenerated, signal } = options
+    const { endpoints, spec, onProgress, onTestGenerated, signal, referenceEndpoints, customRequirements } = options
 
     if (endpoints.length === 0) {
       return {
@@ -102,12 +155,20 @@ export class AnthropicService extends AIService {
     }
 
     console.log('[Anthropic Service] Starting test generation for', endpoints.length, 'endpoints')
+    if (referenceEndpoints && referenceEndpoints.length > 0) {
+      console.log('[Anthropic Service] Including', referenceEndpoints.length, 'reference endpoints for context')
+    }
+    if (customRequirements) {
+      console.log('[Anthropic Service] Custom requirements provided:', customRequirements.substring(0, 100))
+    }
 
-    // Format prompt
-    const prompt = TEST_GENERATION_PROMPT.replace(
-      '{endpoints_json}',
-      formatEndpointsForPrompt(endpoints)
-    ).replace('{spec_json}', formatSpecForPrompt(spec))
+    // Format prompt with new options
+    const hasReferenceEndpoints = !!(referenceEndpoints && referenceEndpoints.length > 0)
+    const prompt = TEST_GENERATION_PROMPT
+      .replace('{endpoints_json}', formatEndpointsForPrompt(endpoints))
+      .replace('{spec_json}', formatSpecForPrompt(spec, hasReferenceEndpoints))
+      .replace('{reference_endpoints}', formatReferenceEndpointsForPrompt(referenceEndpoints || []))
+      .replace('{custom_requirements}', formatCustomRequirementsForPrompt(customRequirements))
 
     try {
       // Use streaming for better UX

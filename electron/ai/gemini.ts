@@ -5,7 +5,14 @@
 import {GoogleGenerativeAI} from '@google/generative-ai'
 import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type GenerateTestsResult, type TestConnectionResult} from './base'
-import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
+import {
+  formatEndpointsForPrompt,
+  formatSpecForPrompt,
+  formatReferenceEndpointsForPrompt,
+  formatCustomRequirementsForPrompt,
+  TEST_CONNECTION_PROMPT,
+  TEST_GENERATION_PROMPT
+} from './prompts'
 
 export interface GeminiConfig {
   apiKey: string
@@ -44,10 +51,37 @@ export class GeminiService extends AIService {
       const text = response.text()
 
       if (text) {
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability } = await import('./model-validator')
+
+        console.log('[Gemini Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResult = await model.generateContent(CAPABILITY_TEST_PROMPT)
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResult.response.text()
+
+        const capabilityValidation = validateModelCapability(capabilityContent)
+
+        console.log('[Gemini Service] Capability test result:', {
+          score: capabilityValidation.score,
+          capable: capabilityValidation.capable,
+          issues: capabilityValidation.issues,
+          warnings: capabilityValidation.warnings,
+          latency: capabilityLatency,
+        })
+
         return {
           success: true,
           message: text,
           latency,
+          capabilityTest: {
+            score: capabilityValidation.score,
+            capable: capabilityValidation.capable,
+            issues: capabilityValidation.issues,
+            warnings: capabilityValidation.warnings,
+            recommendation: capabilityValidation.recommendation,
+          },
         }
       }
 
@@ -57,10 +91,19 @@ export class GeminiService extends AIService {
         error: 'Empty response',
       }
     } catch (error: any) {
+      console.error('[Gemini Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyGeminiError } = await import('./error-detector')
+      const classified = classifyGeminiError(error, this.model)
+
       return {
         success: false,
-        message: 'Failed to connect to Gemini',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }
@@ -69,7 +112,7 @@ export class GeminiService extends AIService {
    * Generate test cases from endpoints
    */
   async generateTests(options: GenerateTestsOptions): Promise<GenerateTestsResult> {
-    const { endpoints, spec, onProgress, onTestGenerated, signal } = options
+    const { endpoints, spec, onProgress, onTestGenerated, signal, referenceEndpoints, customRequirements } = options
 
     if (endpoints.length === 0) {
       return {
@@ -90,12 +133,20 @@ export class GeminiService extends AIService {
     }
 
     console.log('[Gemini Service] Starting test generation for', endpoints.length, 'endpoints')
+    if (referenceEndpoints && referenceEndpoints.length > 0) {
+      console.log('[Gemini Service] Including', referenceEndpoints.length, 'reference endpoints for context')
+    }
+    if (customRequirements) {
+      console.log('[Gemini Service] Custom requirements provided:', customRequirements.substring(0, 100))
+    }
 
-    // Format prompt
-    const prompt = TEST_GENERATION_PROMPT.replace(
-      '{endpoints_json}',
-      formatEndpointsForPrompt(endpoints)
-    ).replace('{spec_json}', formatSpecForPrompt(spec))
+    // Format prompt with new options
+    const hasReferenceEndpoints = !!(referenceEndpoints && referenceEndpoints.length > 0)
+    const prompt = TEST_GENERATION_PROMPT
+      .replace('{endpoints_json}', formatEndpointsForPrompt(endpoints))
+      .replace('{spec_json}', formatSpecForPrompt(spec, hasReferenceEndpoints))
+      .replace('{reference_endpoints}', formatReferenceEndpointsForPrompt(referenceEndpoints || []))
+      .replace('{custom_requirements}', formatCustomRequirementsForPrompt(customRequirements))
 
     try {
       const model = this.client.getGenerativeModel({

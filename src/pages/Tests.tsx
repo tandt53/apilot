@@ -3,33 +3,43 @@ import {useQuery} from '@tanstack/react-query'
 import {useSearchParams} from 'react-router-dom'
 import {
     AlertCircle,
+    ChevronDown,
+    ChevronRight,
     Clock,
     FileText,
     FolderClosed,
     FolderOpen,
     Loader2,
+    Plus,
     RefreshCw,
     Search,
     Trash2,
     X,
 } from 'lucide-react'
+import * as Dialog from '@radix-ui/react-dialog'
 import * as api from '@/lib/api'
 import {deleteTestCasesBySpec} from '@/lib/api/testCases'
-import RequestTester, {SessionState} from '@/components/RequestTester'
 import EnvironmentManager from '@/components/EnvironmentManager'
 import ResizablePanel from '@/components/ResizablePanel'
 import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
 import SaveCancelButtons from '@/components/SaveCancelButtons'
 import Button from '@/components/Button'
+import StepEditor from '@/components/StepEditor'
+import ImportPreviewDialog from '@/components/ImportPreviewDialog'
 import {useEnvironments} from '@/lib/hooks'
-import type {Spec, TestCase} from '@/types/database'
+import type {Spec, TestCase, TestStep} from '@/types/database'
 
 // Group tests by spec
 interface TestGroup {
   spec: Spec
   singleTests: TestCase[]
   workflowTests: TestCase[]
+}
+
+// Session state interface
+interface SessionState {
+  [key: string]: any
 }
 
 // Helper functions for session management
@@ -53,7 +63,8 @@ const loadSession = (testId: number, stepIndex?: number): Partial<SessionState> 
   }
 }
 
-const saveSession = (testId: number, session: SessionState, stepIndex?: number) => {
+// @ts-expect-error unused for now
+const saveSession = (testId: number, session: any, stepIndex?: number) => {
   try {
     console.log('[Tests] Saving session for test', testId, ':', session)
     localStorage.setItem(getSessionKey(testId, stepIndex), JSON.stringify(session))
@@ -87,7 +98,12 @@ export default function Tests() {
     const saved = localStorage.getItem('tests-expanded-sections')
     return saved ? new Set(JSON.parse(saved)) : new Set()
   })
+  const [expandedEndpointGroups, setExpandedEndpointGroups] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('tests-expanded-endpoint-groups')
+    return saved ? new Set(JSON.parse(saved)) : new Set()
+  })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  // @ts-expect-error unused for now
   const [saveHandler, setSaveHandler] = useState<(() => Promise<void>) | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedSpecId, setSelectedSpecId] = useState<number | null>(() => {
@@ -101,7 +117,34 @@ export default function Tests() {
   const [originalTestName, setOriginalTestName] = useState('')
   const [originalTestDescription, setOriginalTestDescription] = useState('')
 
+  // Steps state for unified view
+  const [steps, setSteps] = useState<TestStep[]>([])
+  const [originalSteps, setOriginalSteps] = useState<TestStep[]>([])
+
+  // Create test modal state
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newTestSpecId, setNewTestSpecId] = useState<number | null>(null)
+  const [newTestType, setNewTestType] = useState<'single' | 'workflow'>('single')
+  const [newTestName, setNewTestName] = useState('')
+  const [newTestDescription, setNewTestDescription] = useState('')
+  const [newTestSteps, setNewTestSteps] = useState<TestStep[]>([])
+  const [newTestEndpointId, setNewTestEndpointId] = useState<number | null>(null)
+  const [uploadingSpec, setUploadingSpec] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showImportPreview, setShowImportPreview] = useState(false)
+  const [parsedImportData, setParsedImportData] = useState<{
+    data: any
+    detection: any
+  } | null>(null)
+
+  // Manual spec creation state
+  const [showCreateSpecForm, setShowCreateSpecForm] = useState(false)
+  const [newSpecName, setNewSpecName] = useState('')
+  const [newSpecVersion, setNewSpecVersion] = useState('1.0.0')
+  const [newSpecDescription, setNewSpecDescription] = useState('')
+
   // Memoized callback for handling changes
+  // @ts-expect-error unused for now
   const handleHasChanges = useCallback((hasChanges: boolean, handler: () => Promise<void>) => {
     console.log('[Tests] handleHasChanges called with:', hasChanges);
     setHasUnsavedChanges(hasChanges);
@@ -114,6 +157,13 @@ export default function Tests() {
     setHasUnsavedChanges(false);
     setSaveHandler(null);
   }, [selectedTestId, selectedStepIndex]);
+
+  // Reset endpoint selection when spec changes in create modal
+  useEffect(() => {
+    if (showCreateModal) {
+      setNewTestEndpointId(null)
+    }
+  }, [newTestSpecId, showCreateModal]);
 
   // Monitor URL params and localStorage for generating flag
   useEffect(() => {
@@ -256,12 +306,55 @@ export default function Tests() {
     [allTestCases, selectedTestId]
   )
 
+  // Helper to group single tests by endpoint (method + path) and sort by path
+  const groupSingleTestsByEndpoint = useCallback((singleTests: TestCase[]) => {
+    const groups = new Map<string, {
+      endpointKey: string
+      method: string
+      path: string
+      tests: TestCase[]
+    }>()
+
+    singleTests.forEach(test => {
+      const key = `${test.method} ${test.path}`
+      if (!groups.has(key)) {
+        groups.set(key, {
+          endpointKey: key,
+          method: test.method,
+          path: test.path,
+          tests: []
+        })
+      }
+      groups.get(key)!.tests.push(test)
+    })
+
+    // Sort groups by path
+    return Array.from(groups.values()).sort((a, b) =>
+      a.path.localeCompare(b.path)
+    )
+  }, [])
+
+  // Toggle endpoint group
+  const toggleEndpointGroup = (endpointKey: string) => {
+    setExpandedEndpointGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(endpointKey)) {
+        next.delete(endpointKey)
+      } else {
+        next.add(endpointKey)
+      }
+      return next
+    })
+  }
+
   // Memoize session to avoid recreating on every render
+  // @ts-expect-error unused for now
   const initialSessionForSingleTest = useMemo(
     () => selectedTest?.id ? loadSession(selectedTest.id) : undefined,
     [selectedTest?.id]
   )
 
+  // @ts-expect-error unused for now
   const initialSessionForWorkflowStep = useMemo(
     () => selectedTest?.id && selectedStepIndex !== null ? loadSession(selectedTest.id, selectedStepIndex) : undefined,
     [selectedTest?.id, selectedStepIndex]
@@ -290,28 +383,62 @@ export default function Tests() {
     }
   }, [isGenerating, generatingSpecId])
 
-  // Sync test name and description when selectedTest changes
+  // Sync test name, description, and steps when selectedTest changes
   useEffect(() => {
     if (selectedTest) {
       setTestName(selectedTest.name)
       setTestDescription(selectedTest.description || '')
       setOriginalTestName(selectedTest.name)
       setOriginalTestDescription(selectedTest.description || '')
+
+      // Convert test to steps format
+      if (selectedTest.testType === 'single') {
+        // Single test: create one step from test data
+        const singleStep: TestStep = {
+          id: selectedTest.id?.toString() || crypto.randomUUID(),
+          order: 1,
+          name: selectedTest.name,
+          description: selectedTest.description || '',
+          sourceEndpointId: selectedTest.sourceEndpointId,
+          currentEndpointId: selectedTest.currentEndpointId,
+          isCustomEndpoint: selectedTest.isCustomEndpoint,
+          method: selectedTest.method,
+          path: selectedTest.path,
+          pathVariables: selectedTest.pathVariables || {},
+          queryParams: selectedTest.queryParams || {},
+          headers: selectedTest.headers || {},
+          body: selectedTest.body,
+          assertions: selectedTest.assertions || [],
+          extractVariables: [],
+          delayBefore: 0,
+          delayAfter: 0,
+          skipOnFailure: false,
+          continueOnFailure: false,
+        }
+        setSteps([singleStep])
+        setOriginalSteps([singleStep])
+      } else {
+        // Workflow test: use existing steps
+        setSteps(selectedTest.steps || [])
+        setOriginalSteps(selectedTest.steps || [])
+      }
     } else {
       setTestName('')
       setTestDescription('')
       setOriginalTestName('')
       setOriginalTestDescription('')
+      setSteps([])
     }
   }, [selectedTest?.id])
 
-  // Track changes in name/description
+  // Track changes in name/description/steps
   const [hasHeaderChanges, setHasHeaderChanges] = useState(false)
   useEffect(() => {
     const nameChanged = testName !== originalTestName
     const descChanged = testDescription !== originalTestDescription
-    setHasHeaderChanges(nameChanged || descChanged)
-  }, [testName, testDescription, originalTestName, originalTestDescription])
+    const stepsChanged = JSON.stringify(steps) !== JSON.stringify(originalSteps)
+    setHasHeaderChanges(nameChanged || descChanged || stepsChanged)
+  }, [testName, testDescription, originalTestName, originalTestDescription, steps, originalSteps])
 
   // Combine header changes with request changes
   useEffect(() => {
@@ -447,6 +574,11 @@ export default function Tests() {
     localStorage.setItem('tests-expanded-sections', JSON.stringify(Array.from(expandedSections)))
   }, [expandedSections])
 
+  // Persist expanded endpoint groups
+  useEffect(() => {
+    localStorage.setItem('tests-expanded-endpoint-groups', JSON.stringify(Array.from(expandedEndpointGroups)))
+  }, [expandedEndpointGroups])
+
   // Toggle spec folder
   const toggleSpec = (specId: number) => {
     setExpandedSpecs(prev => {
@@ -495,6 +627,7 @@ export default function Tests() {
     }
   }
 
+  // @ts-expect-error unused for now
   const handleStepUpdate = async (testId: number, stepIndex: number, updates: any) => {
     try {
       // Get current test case
@@ -538,6 +671,267 @@ export default function Tests() {
     }
   }
 
+  // Load endpoints for selected spec in create modal
+  const { data: newTestEndpoints } = useQuery({
+    queryKey: ['endpoints', newTestSpecId],
+    queryFn: () => newTestSpecId ? api.getEndpointsBySpec(newTestSpecId) : Promise.resolve([]),
+    enabled: !!newTestSpecId && showCreateModal,
+  })
+
+  // Handler to open create test modal
+  const handleOpenCreateModal = () => {
+    // Initialize with first spec if available
+    const firstSpecId = testGroups?.[0]?.spec.id || null
+    setNewTestSpecId(firstSpecId)
+    setNewTestType('single')
+    setNewTestName('')
+    setNewTestDescription('')
+    setNewTestEndpointId(null)
+
+    // Initialize with one default step
+    const defaultStep: TestStep = {
+      id: crypto.randomUUID(),
+      order: 1,
+      name: 'Step 1',
+      description: '',
+      sourceEndpointId: undefined,
+      currentEndpointId: undefined,
+      isCustomEndpoint: true,
+      method: 'GET',
+      path: '/',
+      pathVariables: {},
+      queryParams: {},
+      headers: {},
+      body: undefined,
+      assertions: [],
+      extractVariables: [],
+      delayBefore: 0,
+      delayAfter: 0,
+      skipOnFailure: false,
+      continueOnFailure: false,
+    }
+    setNewTestSteps([defaultStep])
+    setShowCreateModal(true)
+  }
+
+  // Handler when endpoint is selected for single test
+  const handleEndpointSelect = (endpointId: number) => {
+    setNewTestEndpointId(endpointId)
+    const endpoint = newTestEndpoints?.find(e => e.id === endpointId)
+
+    if (endpoint) {
+      // Update the first step with endpoint data
+      const pathParams = endpoint.request?.parameters?.filter(p => p.in === 'path') || []
+      const queryParams = endpoint.request?.parameters?.filter(p => p.in === 'query') || []
+      const headerParams = endpoint.request?.parameters?.filter(p => p.in === 'header') || []
+
+      const updatedStep: TestStep = {
+        id: newTestSteps[0]?.id || crypto.randomUUID(),
+        order: 1,
+        name: endpoint.name || `${endpoint.method} ${endpoint.path}`,
+        description: endpoint.description || '',
+        sourceEndpointId: endpoint.id,
+        currentEndpointId: endpoint.id,
+        isCustomEndpoint: false,
+        method: endpoint.method,
+        path: endpoint.path,
+        pathVariables: pathParams.reduce((acc, p) => ({ ...acc, [p.name]: p.example || '' }), {} as Record<string, any>),
+        queryParams: queryParams.reduce((acc, p) => ({ ...acc, [p.name]: p.example || '' }), {} as Record<string, any>),
+        headers: headerParams.reduce((acc, p) => ({ ...acc, [p.name]: String(p.example || '') }), {} as Record<string, string>),
+        body: endpoint.request?.body?.example || undefined,
+        assertions: [],
+        extractVariables: [],
+        delayBefore: 0,
+        delayAfter: 0,
+        skipOnFailure: false,
+        continueOnFailure: false,
+      }
+      setNewTestSteps([updatedStep])
+
+      // Auto-fill test name if empty
+      if (!newTestName) {
+        setNewTestName(endpoint.name || `Test ${endpoint.method} ${endpoint.path}`)
+      }
+    }
+  }
+
+  // Handle spec file upload for create test modal
+  const handleSpecUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingSpec(true)
+    try {
+      const content = await file.text()
+      await importSpecContent(content)
+    } catch (error: any) {
+      alert(`Failed to upload spec: ${error.message}`)
+    } finally {
+      setUploadingSpec(false)
+      e.target.value = ''
+    }
+  }
+
+  const importSpecContent = async (content: string) => {
+    // Use unified parser to detect and parse format
+    const { parseImportedContent } = await import('@/lib/converters')
+    const parseResult = await parseImportedContent(content)
+
+    if (!parseResult.success || !parseResult.data) {
+      throw new Error(parseResult.error || 'Failed to parse imported content')
+    }
+
+    const { data: parsedData, detection } = parseResult
+
+    console.log(`[Import] Detected format: ${detection.format} (${detection.version || 'unknown version'})`)
+
+    // Store parsed data and show preview dialog
+    setParsedImportData({ data: parsedData, detection })
+    setShowImportPreview(true)
+  }
+
+  const handleImportSuccess = async () => {
+    // Save the spec name for matching
+    const importedSpecName = parsedImportData?.data.name
+
+    // Close import preview first
+    setShowImportPreview(false)
+    setParsedImportData(null)
+
+    // Refresh test groups to get the new spec
+    await refetch()
+
+    // Try to find and select the newly created spec by name
+    // Note: refetch updates testGroups, but we need to wait for the query to update
+    // We'll use a timeout to allow the data to refresh
+    setTimeout(() => {
+      if (importedSpecName && testGroups) {
+        const newSpec = testGroups.find(g => g.spec.name === importedSpecName)
+        if (newSpec?.spec.id) {
+          setNewTestSpecId(newSpec.spec.id)
+        }
+      }
+    }, 500)
+  }
+
+  // Handler for spec dropdown change
+  const handleSpecChange = (value: string) => {
+    if (value === 'CREATE_NEW') {
+      // Show manual spec creation form
+      setShowCreateSpecForm(true)
+      setNewSpecName('')
+      setNewSpecVersion('1.0.0')
+      setNewSpecDescription('')
+    } else {
+      setNewTestSpecId(value ? Number(value) : null)
+    }
+  }
+
+  // Handler to create spec manually
+  const handleCreateSpecManually = async () => {
+    if (!newSpecName.trim()) {
+      alert('Please enter a spec name')
+      return
+    }
+    if (!newSpecVersion.trim()) {
+      alert('Please enter a spec version')
+      return
+    }
+
+    try {
+      // Create a minimal spec without importing a file
+      const newSpec = await api.createSpec({
+        name: newSpecName.trim(),
+        version: newSpecVersion.trim(),
+        description: newSpecDescription.trim() || undefined,
+        baseUrl: '',
+        rawSpec: JSON.stringify({
+          info: {
+            title: newSpecName.trim(),
+            version: newSpecVersion.trim(),
+            description: newSpecDescription.trim() || undefined,
+          }
+        }),
+        format: 'openapi',
+        versionGroup: crypto.randomUUID(),
+        isLatest: true,
+        originalName: newSpecName.trim(),
+      })
+
+      // Refresh test groups
+      await refetch()
+
+      // Select the newly created spec
+      if (newSpec.id) {
+        setNewTestSpecId(newSpec.id)
+      }
+
+      // Close the form
+      setShowCreateSpecForm(false)
+
+      alert('Spec created successfully!')
+    } catch (error: any) {
+      alert(`Failed to create spec: ${error.message}`)
+    }
+  }
+
+  // Handler to save new test
+  const handleSaveNewTest = async () => {
+    if (!newTestSpecId) {
+      alert('Please select a spec')
+      return
+    }
+    if (newTestType === 'single' && !newTestEndpointId) {
+      alert('Please select an endpoint for single test')
+      return
+    }
+    if (!newTestName.trim()) {
+      alert('Please enter a test name')
+      return
+    }
+    if (newTestSteps.length === 0) {
+      alert('Please add at least one step')
+      return
+    }
+
+    try {
+      const newTest: Partial<TestCase> = {
+        specId: newTestSpecId,
+        name: newTestName,
+        description: newTestDescription,
+        testType: newTestType,
+      }
+
+      if (newTestType === 'single' && newTestSteps.length > 0) {
+        // For single test, use first step data
+        const step = newTestSteps[0]
+        newTest.method = step.method
+        newTest.path = step.path
+        newTest.sourceEndpointId = step.sourceEndpointId
+        newTest.currentEndpointId = step.currentEndpointId
+        newTest.isCustomEndpoint = step.isCustomEndpoint
+        newTest.pathVariables = step.pathVariables
+        newTest.queryParams = step.queryParams
+        newTest.headers = step.headers
+        newTest.body = step.body
+        newTest.assertions = step.assertions
+      } else {
+        // For workflow test, save steps
+        newTest.steps = newTestSteps
+        // Use first step for method/path display
+        newTest.method = newTestSteps[0].method
+        newTest.path = newTestSteps[0].path
+      }
+
+      await api.createTestCase(newTest as any)
+      await refetch()
+      setShowCreateModal(false)
+      alert('Test created successfully!')
+    } catch (error: any) {
+      alert(`Failed to create test: ${error.message}`)
+    }
+  }
+
   return (
     <>
       <PageLayout>
@@ -573,6 +967,13 @@ export default function Tests() {
                 title="Refresh Tests"
               >
                 <RefreshCw size={18} className="text-purple-600" />
+              </button>
+              <button
+                onClick={handleOpenCreateModal}
+                className="glass-panel rounded-full p-2.5 hover:shadow-lg transition-all flex-shrink-0 active:scale-95"
+                title="Create New Test"
+              >
+                <Plus size={18} className="text-purple-600" />
               </button>
             </div>
 
@@ -884,16 +1285,66 @@ export default function Tests() {
 
                             {expandedSections.has(`${specId}-single`) && (
                               <div className="ml-2 mt-1 space-y-1">
-                                {group.singleTests.map(test => (
-                                  <EndpointCard
-                                    key={test.id}
-                                    method={test.method}
-                                    path={test.path}
-                                    name={test.name}
-                                    isSelected={test.id === selectedTestId}
-                                    onClick={() => setSelectedTestId(test.id!)}
-                                  />
-                                ))}
+                                {/* Group single tests by endpoint */}
+                                {groupSingleTestsByEndpoint(group.singleTests).map(endpointGroup => {
+                                  const isGroupExpanded = expandedEndpointGroups.has(endpointGroup.endpointKey)
+
+                                  return (
+                                    <div key={endpointGroup.endpointKey}>
+                                      {/* Endpoint Group Header */}
+                                      <button
+                                        onClick={() => toggleEndpointGroup(endpointGroup.endpointKey)}
+                                        className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                                      >
+                                        {/* Expand/Collapse Icon */}
+                                        {isGroupExpanded ?
+                                          <ChevronDown size={14} className="text-gray-500 flex-shrink-0" /> :
+                                          <ChevronRight size={14} className="text-gray-500 flex-shrink-0" />
+                                        }
+
+                                        {/* Method Badge */}
+                                        <span className={`text-xs font-mono font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${
+                                          endpointGroup.method === 'GET' ? 'bg-blue-100 text-blue-700' :
+                                          endpointGroup.method === 'POST' ? 'bg-green-100 text-green-700' :
+                                          endpointGroup.method === 'PUT' ? 'bg-orange-100 text-orange-700' :
+                                          endpointGroup.method === 'PATCH' ? 'bg-yellow-100 text-yellow-700' :
+                                          endpointGroup.method === 'DELETE' ? 'bg-red-100 text-red-700' :
+                                          'bg-gray-100 text-gray-700'
+                                        }`}>
+                                          {endpointGroup.method}
+                                        </span>
+
+                                        {/* Path */}
+                                        <span className="text-sm text-gray-700 font-mono truncate flex-1">
+                                          {endpointGroup.path}
+                                        </span>
+
+                                        {/* Test Count */}
+                                        <span className="text-xs text-gray-500 flex-shrink-0">
+                                          ({endpointGroup.tests.length})
+                                        </span>
+                                      </button>
+
+                                      {/* Tests under this endpoint */}
+                                      {isGroupExpanded && (
+                                        <div className="ml-4 mt-1 space-y-1">
+                                          {endpointGroup.tests.map(test => (
+                                            <EndpointCard
+                                              key={test.id}
+                                              method={test.method}
+                                              path={test.path}
+                                              name={test.name}
+                                              isSelected={test.id === selectedTestId}
+                                              onClick={() => setSelectedTestId(test.id!)}
+                                              hideEndpointInfo={true}
+                                            />
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+
                                 {/* Loading skeleton when generating tests for this spec */}
                                 {isGenerating && generatingSpecId === specId && (
                                   <div ref={testListRef} className="space-y-1">
@@ -939,17 +1390,21 @@ export default function Tests() {
 
                             {expandedSections.has(`${specId}-workflow`) && (
                               <div className="ml-2 mt-1 space-y-1">
-                                {group.workflowTests.map(test => (
-                                  <EndpointCard
-                                    key={test.id}
-                                    method={test.method}
-                                    path={test.path}
-                                    name={test.name}
-                                    stepCount={test.steps?.length || 0}
-                                    isSelected={test.id === selectedTestId}
-                                    onClick={() => setSelectedTestId(test.id!)}
-                                  />
-                                ))}
+                                {/* Sort workflow tests by path */}
+                                {[...group.workflowTests]
+                                  .sort((a, b) => a.path.localeCompare(b.path))
+                                  .map(test => (
+                                    <EndpointCard
+                                      key={test.id}
+                                      method={test.method}
+                                      path={test.path}
+                                      name={test.name}
+                                      stepCount={test.steps?.length || 0}
+                                      isSelected={test.id === selectedTestId}
+                                      onClick={() => setSelectedTestId(test.id!)}
+                                      hideEndpointInfo={true}
+                                    />
+                                  ))}
                               </div>
                             )}
                           </div>
@@ -1081,25 +1536,38 @@ export default function Tests() {
                           const updates: any = {}
 
                           // Save name/description changes
-                          if (hasHeaderChanges) {
-                            if (testName !== originalTestName) {
-                              updates.name = testName
-                            }
-                            if (testDescription !== originalTestDescription) {
-                              updates.description = testDescription
+                          if (testName !== originalTestName) {
+                            updates.name = testName
+                          }
+                          if (testDescription !== originalTestDescription) {
+                            updates.description = testDescription
+                          }
+
+                          // Save steps changes
+                          if (JSON.stringify(steps) !== JSON.stringify(originalSteps)) {
+                            if (selectedTest.testType === 'single' && steps.length > 0) {
+                              // For single tests, update test data from the first step
+                              const step = steps[0]
+                              updates.method = step.method
+                              updates.path = step.path
+                              updates.pathVariables = step.pathVariables
+                              updates.queryParams = step.queryParams
+                              updates.headers = step.headers
+                              updates.body = step.body
+                              updates.assertions = step.assertions
+                              updates.extractVariables = step.extractVariables
+                            } else {
+                              // For workflow tests, update steps array
+                              updates.steps = steps
                             }
                           }
 
-                          // Save request changes via RequestTester's save handler
-                          if (saveHandler) {
-                            await saveHandler()
-                          }
-
-                          // Save header changes if any
+                          // Save changes if any
                           if (Object.keys(updates).length > 0 && selectedTest) {
                             await handleTestUpdate(selectedTest.id!, updates)
                             setOriginalTestName(testName)
                             setOriginalTestDescription(testDescription)
+                            setOriginalSteps(steps)
                           }
 
                           // Reset change tracking
@@ -1124,260 +1592,353 @@ export default function Tests() {
                 </div>
               </div>
 
-              {/* Test Details */}
-              {selectedTest.testType === 'single' ? (
-                /* Single Test View - Use RequestTester with Canonical Format */
-                (() => {
-                  // Determine content type from headers
-                  const contentType = selectedTest.headers?.['Content-Type'] ||
-                                     selectedTest.headers?.['content-type'] ||
-                                     'application/json'
-
-                  // Build canonical request body
-                  let body = undefined
-                  if (selectedTest.body) {
-                    if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-                      // For form data, create fields array
-                      const fields: any[] = []
-                      if (typeof selectedTest.body === 'object') {
-                        Object.entries(selectedTest.body).forEach(([key, value]) => {
-                          // Detect file fields
-                          if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
-                            fields.push({
-                              name: key,
-                              type: 'file',
-                              format: 'binary',
-                              required: false,
-                              example: value,
-                              description: 'File upload'
-                            })
-                          } else {
-                            fields.push({
-                              name: key,
-                              type: 'string',
-                              required: false,
-                              example: value
-                            })
-                          }
-                        })
-                      }
-                      body = {
-                        required: true,
-                        fields,
-                        example: undefined  // No JSON example for form data
-                      }
-                    } else {
-                      // For JSON or other types, just provide example
-                      body = {
-                        required: true,
-                        example: selectedTest.body
-                      }
-                    }
-                  }
-
-                  return (
-                    <RequestTester
-                      key={selectedTest.id}
-                      endpoint={{
-                        method: selectedTest.method,
-                        path: selectedTest.path,
-                        name: selectedTest.description || selectedTest.name,
-                        request: {
-                          contentType,
-                          parameters: [
-                            // Convert path variables to canonical parameters
-                            ...Object.keys(selectedTest.pathVariables || {}).map(key => ({
-                              name: key,
-                              in: 'path' as const,
-                              type: 'string',
-                              required: true,
-                              example: selectedTest.pathVariables![key]
-                            })),
-                            // Convert query params to canonical parameters
-                            ...Object.keys(selectedTest.queryParams || {}).map(key => ({
-                              name: key,
-                              in: 'query' as const,
-                              type: 'string',
-                              required: false,
-                              example: selectedTest.queryParams![key]
-                            }))
-                          ],
-                          body
-                        },
-                        // Current test assertions (will be used as initial state)
-                        assertions: selectedTest.assertions
-                      } as any}
-                      testCase={selectedTest}
-                      onTestUpdate={(updates) => handleTestUpdate(selectedTest.id!, updates)}
-                      onHasChanges={handleHasChanges}
-                      showSaveButton={false}
-                      readOnly={false}
-                      specId={String(selectedTest.specId)}
-                      selectedEnv={selectedEnv}
-                      environments={environments}
-                      selectedEnvId={selectedEnvId}
-                      onEnvChange={setSelectedEnvId}
-                      initialSession={initialSessionForSingleTest}
-                      onSessionChange={(session) => saveSession(selectedTest.id!, session)}
-                      defaultAssertions={selectedTest.assertions}
-                    />
-                  )
-                })()
-              ) : (
-                /* Workflow Test View */
-                <div className="space-y-4">
-                  {/* Steps List */}
-                  <div className="bg-white border border-gray-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-gray-900 mb-4">
-                      Workflow Steps ({selectedTest.steps?.length || 0})
+              {/* Test Details - Unified Steps View */}
+              <div className="bg-white border border-gray-200 rounded-lg">
+                {/* Steps Header */}
+                <div className="border-b border-gray-200 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Steps ({steps.length})
                     </h3>
-                    <div className="space-y-2">
-                      {selectedTest.steps?.map((step, idx) => (
-                        <button
-                          key={step.id}
-                          onClick={() => setSelectedStepIndex(selectedStepIndex === idx ? null : idx)}
-                          className={`w-full border rounded-lg p-4 text-left transition-colors ${
-                            selectedStepIndex === idx
-                              ? 'border-purple-300 bg-purple-50'
-                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="flex items-center justify-center w-6 h-6 bg-purple-600 text-white text-xs font-bold rounded-full">
-                              {step.order}
-                            </span>
-                            <h4 className="font-medium text-gray-900">{step.name}</h4>
-                            <code className="text-xs text-gray-600">{step.method} {step.path}</code>
-                          </div>
-                          {step.description && (
-                            <p className="text-sm text-gray-600 mb-2 ml-9">{step.description}</p>
-                          )}
-                          <div className="ml-9 text-xs text-gray-500">
-                            {step.assertions.length} assertions • Click to test
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Selected Step Detail */}
-                  {selectedStepIndex !== null && selectedTest.steps && selectedTest.steps[selectedStepIndex] && (
-                    <div className="bg-white border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-gray-900">
-                          Step {selectedTest.steps[selectedStepIndex].order}: {selectedTest.steps[selectedStepIndex].name}
-                        </h3>
-                        <button
-                          onClick={() => setSelectedStepIndex(null)}
-                          className="text-gray-400 hover:text-gray-600"
-                        >
-                          <X size={20} />
-                        </button>
-                      </div>
-                      {(() => {
-                        const step = selectedTest.steps![selectedStepIndex]
-
-                        // Determine content type from headers
-                        const contentType = step.headers?.['Content-Type'] ||
-                                           step.headers?.['content-type'] ||
-                                           'application/json'
-
-                        // Build canonical request body
-                        let body = undefined
-                        if (step.body) {
-                          if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-                            // For form data, create fields array
-                            const fields: any[] = []
-                            if (typeof step.body === 'object') {
-                              Object.entries(step.body).forEach(([key, value]) => {
-                                // Detect file fields
-                                if (key === 'file' || key.toLowerCase().includes('file') || key.toLowerCase().includes('image')) {
-                                  fields.push({
-                                    name: key,
-                                    type: 'string',
-                                    format: 'binary',
-                                    required: false,
-                                    example: undefined,
-                                    description: 'File upload'
-                                  })
-                                } else {
-                                  fields.push({
-                                    name: key,
-                                    type: 'string',
-                                    required: false,
-                                    example: value
-                                  })
-                                }
-                              })
-                            }
-                            body = {
-                              required: true,
-                              fields,
-                              example: undefined  // No JSON example for form data
-                            }
-                          } else {
-                            // For JSON or other types, just provide example
-                            body = {
-                              required: true,
-                              example: step.body
-                            }
-                          }
+                    <button
+                      onClick={() => {
+                        const newStep: TestStep = {
+                          id: crypto.randomUUID(),
+                          order: steps.length + 1,
+                          name: `Step ${steps.length + 1}`,
+                          description: '',
+                          sourceEndpointId: undefined,
+                          currentEndpointId: undefined,
+                          isCustomEndpoint: true,
+                          method: 'GET',
+                          path: '/',
+                          pathVariables: {},
+                          queryParams: {},
+                          headers: {},
+                          body: undefined,
+                          assertions: [],
+                          extractVariables: [],
+                          delayBefore: 0,
+                          delayAfter: 0,
+                          skipOnFailure: false,
+                          continueOnFailure: false,
                         }
-
-                        return (
-                          <RequestTester
-                            key={step.id || `step-${selectedStepIndex}`}
-                            endpoint={{
-                              method: step.method,
-                              path: step.path,
-                              name: step.description || step.name,
-                              request: {
-                                contentType,
-                                parameters: [
-                                  // Convert path variables to canonical parameters
-                                  ...Object.keys(step.pathVariables || {}).map(key => ({
-                                    name: key,
-                                    in: 'path' as const,
-                                    type: 'string',
-                                    required: true,
-                                    example: step.pathVariables![key]
-                                  })),
-                                  // Convert query params to canonical parameters
-                                  ...Object.keys(step.queryParams || {}).map(key => ({
-                                    name: key,
-                                    in: 'query' as const,
-                                    type: 'string',
-                                    required: false,
-                                    example: step.queryParams![key]
-                                  }))
-                                ],
-                                body
-                              },
-                              assertions: step.assertions
-                            } as any}
-                            testCase={step}
-                            onTestUpdate={(updates) => handleStepUpdate(selectedTest.id!, selectedStepIndex, updates)}
-                            onHasChanges={handleHasChanges}
-                            showSaveButton={false}
-                            readOnly={false}
-                            specId={String(selectedTest.specId)}
-                            selectedEnv={selectedEnv}
-                            environments={environments}
-                            selectedEnvId={selectedEnvId}
-                            onEnvChange={setSelectedEnvId}
-                            initialSession={initialSessionForWorkflowStep}
-                            onSessionChange={(session) => saveSession(selectedTest.id!, session, selectedStepIndex)}
-                          />
-                        )
-                      })()}
-                    </div>
-                  )}
+                        setSteps([...steps, newStep])
+                      }}
+                      className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                      title="Add step"
+                    >
+                      <Plus size={20} />
+                    </button>
+                  </div>
                 </div>
-              )}
+
+                {/* Steps Content */}
+                <div className="p-4">
+                  <StepEditor
+                    steps={steps}
+                    onStepsChange={setSteps}
+                    environment={selectedEnv}
+                    environments={environments}
+                    selectedEnvId={selectedEnvId}
+                    onEnvChange={setSelectedEnvId}
+                    mode="edit"
+                    specId={String(selectedTest.specId)}
+                  />
+                </div>
+              </div>
             </div>
           ) : null}
         </div>
     </PageLayout>
+
+    {/* Create Test Modal */}
+    <Dialog.Root open={showCreateModal} onOpenChange={setShowCreateModal}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" />
+        <Dialog.Content className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden z-50 flex flex-col">
+          {/* Modal Header */}
+          <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <Dialog.Title className="text-xl font-bold text-gray-900">
+                Create New Test
+              </Dialog.Title>
+              <Dialog.Close className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                <X size={20} className="text-gray-500" />
+              </Dialog.Close>
+            </div>
+          </div>
+
+          {/* Modal Body - Scrollable */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {/* Spec Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Specification *
+              </label>
+              <select
+                value={newTestSpecId || ''}
+                onChange={(e) => handleSpecChange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                disabled={uploadingSpec}
+              >
+                <option value="">Select a spec</option>
+                {testGroups?.map(group => (
+                  <option key={group.spec.id} value={group.spec.id}>
+                    {group.spec.name} (v{group.spec.version})
+                  </option>
+                ))}
+                <option value="CREATE_NEW" className="font-semibold text-purple-600">
+                  + Create New Spec
+                </option>
+              </select>
+              {uploadingSpec && (
+                <p className="mt-1 text-xs text-purple-600">Uploading spec...</p>
+              )}
+              {/* Hidden file input for spec upload */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.yaml,.yml"
+                onChange={handleSpecUpload}
+                className="hidden"
+              />
+            </div>
+
+            {/* Create Spec Form (shown when user clicks "Create New Spec") */}
+            {showCreateSpecForm && (
+              <div className="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-purple-900">Create New Specification</h3>
+                  <button
+                    onClick={() => setShowCreateSpecForm(false)}
+                    className="p-1 hover:bg-purple-100 rounded transition-colors"
+                  >
+                    <X size={16} className="text-purple-600" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Spec Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={newSpecName}
+                      onChange={(e) => setNewSpecName(e.target.value)}
+                      placeholder="e.g., My API"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Version *
+                    </label>
+                    <input
+                      type="text"
+                      value={newSpecVersion}
+                      onChange={(e) => setNewSpecVersion(e.target.value)}
+                      placeholder="e.g., 1.0.0"
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Description (optional)
+                    </label>
+                    <textarea
+                      value={newSpecDescription}
+                      onChange={(e) => setNewSpecDescription(e.target.value)}
+                      placeholder="Brief description of this specification"
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleCreateSpecManually}
+                    className="w-full px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                  >
+                    Create Spec
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Test Type Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Test Type
+              </label>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setNewTestType('single')}
+                  className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                    newTestType === 'single'
+                      ? 'border-purple-500 bg-purple-50 text-purple-900'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="font-semibold">Single Test</div>
+                  <div className="text-xs mt-1 opacity-75">Test one endpoint</div>
+                </button>
+                <button
+                  onClick={() => setNewTestType('workflow')}
+                  className={`flex-1 px-4 py-3 rounded-lg border-2 transition-all ${
+                    newTestType === 'workflow'
+                      ? 'border-purple-500 bg-purple-50 text-purple-900'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="font-semibold">Workflow Test</div>
+                  <div className="text-xs mt-1 opacity-75">Test multiple steps</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Endpoint Selector (only for single tests) */}
+            {newTestType === 'single' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Endpoint *
+                </label>
+                <select
+                  value={newTestEndpointId || ''}
+                  onChange={(e) => handleEndpointSelect(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  disabled={!newTestSpecId}
+                >
+                  <option value="">Select an endpoint</option>
+                  {newTestEndpoints?.map(endpoint => (
+                    <option key={endpoint.id} value={endpoint.id}>
+                      {endpoint.method} {endpoint.path} {endpoint.name ? `- ${endpoint.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {!newTestSpecId && (
+                  <p className="mt-1 text-xs text-gray-500">Please select a spec first</p>
+                )}
+              </div>
+            )}
+
+            {/* Test Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Test Name *
+              </label>
+              <input
+                type="text"
+                value={newTestName}
+                onChange={(e) => setNewTestName(e.target.value)}
+                placeholder="Enter test name"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+
+            {/* Test Description */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Test Description
+              </label>
+              <textarea
+                value={newTestDescription}
+                onChange={(e) => setNewTestDescription(e.target.value)}
+                placeholder="Enter test description (optional)"
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            {/* Steps Editor */}
+            <div className="bg-white border border-gray-200 rounded-lg">
+              <div className="border-b border-gray-200 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Steps ({newTestSteps.length})
+                  </h3>
+                  <button
+                    onClick={() => {
+                      const newStep: TestStep = {
+                        id: crypto.randomUUID(),
+                        order: newTestSteps.length + 1,
+                        name: `Step ${newTestSteps.length + 1}`,
+                        description: '',
+                        sourceEndpointId: undefined,
+                        currentEndpointId: undefined,
+                        isCustomEndpoint: true,
+                        method: 'GET',
+                        path: '/',
+                        pathVariables: {},
+                        queryParams: {},
+                        headers: {},
+                        body: undefined,
+                        assertions: [],
+                        extractVariables: [],
+                        delayBefore: 0,
+                        delayAfter: 0,
+                        skipOnFailure: false,
+                        continueOnFailure: false,
+                      }
+                      setNewTestSteps([...newTestSteps, newStep])
+                    }}
+                    className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    title="Add step"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </div>
+              </div>
+              <div className="p-4">
+                <StepEditor
+                  steps={newTestSteps}
+                  onStepsChange={setNewTestSteps}
+                  environment={undefined}
+                  environments={[]}
+                  selectedEnvId={null}
+                  onEnvChange={() => {}}
+                  mode="edit"
+                  specId={String(newTestSpecId || '')}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Modal Footer */}
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">
+            <button
+              onClick={() => setShowCreateModal(false)}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveNewTest}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+            >
+              Create Test
+            </button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+
+    {/* Import Preview Dialog */}
+    {showImportPreview && parsedImportData && (
+      <ImportPreviewDialog
+        isOpen={showImportPreview}
+        parsedData={parsedImportData.data}
+        detection={parsedImportData.detection}
+        specs={testGroups?.map(g => g.spec) || []}
+        onSuccess={handleImportSuccess}
+        onCancel={() => {
+          setShowImportPreview(false)
+          setParsedImportData(null)
+        }}
+      />
+    )}
     </>
   )
 }

@@ -1,8 +1,8 @@
-import {useEffect, useState} from 'react'
+import {useEffect, useMemo, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import {useQuery, useQueryClient} from '@tanstack/react-query'
 import {useEnvironments, useSpecs} from '@/lib/hooks'
-import {AlertCircle, Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
+import {AlertCircle, ArrowDownAZ, ArrowDownZA, ArrowUpDown, Copy, Download, Edit3, FileCode, FolderClosed, FolderOpen, Search, Sparkles, Trash2, Upload, X, Zap} from 'lucide-react'
 import * as api from '@/lib/api'
 import EndpointDetail from '@/components/EndpointDetail'
 import EnvironmentManager from '@/components/EnvironmentManager'
@@ -11,6 +11,7 @@ import EndpointCard from '@/components/EndpointCard'
 import PageLayout from '@/components/PageLayout'
 import Button from '@/components/Button'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog'
+import TestGenerationConfigModal, {TestGenerationConfig} from '@/components/TestGenerationConfigModal'
 import type {Endpoint, Spec} from '@/types/database'
 import {generateTestsViaIPC} from "@/lib/ai/client.ts";
 
@@ -41,6 +42,43 @@ export default function SpecsNew() {
   const [curlText, setCurlText] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Endpoint sorting
+  type EndpointSortOption = 'method' | 'path-asc' | 'path-desc'
+  const [endpointSort, setEndpointSort] = useState<EndpointSortOption>(() => {
+    const saved = localStorage.getItem('specs-endpoint-sort')
+    return (saved as EndpointSortOption) || 'method'
+  })
+
+  // Persist endpoint sort preference
+  useEffect(() => {
+    localStorage.setItem('specs-endpoint-sort', endpointSort)
+  }, [endpointSort])
+
+  // Sort endpoints function
+  const sortEndpoints = useMemo(() => {
+    return (endpoints: Endpoint[]) => {
+      const sorted = [...endpoints]
+      switch (endpointSort) {
+        case 'method': {
+          const methodOrder = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+          return sorted.sort((a, b) => {
+            const aIndex = methodOrder.indexOf(a.method.toUpperCase())
+            const bIndex = methodOrder.indexOf(b.method.toUpperCase())
+            const aOrder = aIndex === -1 ? 999 : aIndex
+            const bOrder = bIndex === -1 ? 999 : bIndex
+            return aOrder - bOrder
+          })
+        }
+        case 'path-asc':
+          return sorted.sort((a, b) => a.path.localeCompare(b.path))
+        case 'path-desc':
+          return sorted.sort((a, b) => b.path.localeCompare(a.path))
+        default:
+          return sorted
+      }
+    }
+  }, [endpointSort])
+
   // Import preview state
   const [showImportPreview, setShowImportPreview] = useState(false)
   const [parsedImportData, setParsedImportData] = useState<{
@@ -53,6 +91,7 @@ export default function SpecsNew() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [_generationProgress, setGenerationProgress] = useState<{ current: number; total: number } | null>(null)
   const [selectionModeSpecId, setSelectionModeSpecId] = useState<number | null>(null)
+  const [showConfigModal, setShowConfigModal] = useState(false)
 
   // Continue generation states (for token limit handling)
   const [remainingEndpointIds, setRemainingEndpointIds] = useState<Set<number>>(new Set())
@@ -541,6 +580,20 @@ export default function SpecsNew() {
       return
     }
 
+    // Show configuration modal
+    setShowConfigModal(true)
+  }
+
+  const handleGenerateWithConfig = async (config: TestGenerationConfig) => {
+    // Get endpoints for selected spec from specGroups
+    const selectedSpecGroup = specGroups?.find(g => g.spec.id === selectedSpecId)
+    const specEndpoints = selectedSpecGroup?.endpoints || []
+
+    const selectedSpec = specs?.find(s => s.id === selectedSpecId)
+    if (!selectedSpec) {
+      return
+    }
+
     try {
       setIsGenerating(true)
       setGenerationProgress({ current: 0, total: selectedEndpointIds.size })
@@ -596,11 +649,29 @@ export default function SpecsNew() {
       // Track saved test names to prevent duplicates
       const savedTestNames = new Set<string>()
 
+      // Prepare reference endpoints based on config mode
+      let referenceEndpoints: any[] | undefined
+      if (config.contextMode === 'all-reference') {
+        referenceEndpoints = specEndpoints
+      } else if (config.contextMode === 'unselected-reference') {
+        // Use specific selected reference endpoints if provided
+        if (config.selectedReferenceIds && config.selectedReferenceIds.length > 0) {
+          referenceEndpoints = specEndpoints.filter(e => config.selectedReferenceIds!.includes(e.id!))
+        } else {
+          // Fallback to all unselected endpoints (shouldn't happen due to validation)
+          referenceEndpoints = specEndpoints.filter(e => !selectedEndpointIds.has(e.id!))
+        }
+      }
+      // 'selected-only' mode doesn't need reference endpoints
+
       // Generate tests with streaming via IPC
       const result = await generateTestsViaIPC({
         endpoints: endpointsToGenerate,
         spec: parsedSpec,
         previousMetadata,
+        contextMode: config.contextMode,
+        referenceEndpoints,
+        customRequirements: config.customRequirements,
         onProgress: (progress: any) => {
           setGenerationProgress({ current: progress.current, total: selectedEndpointIds.size })
         },
@@ -748,33 +819,53 @@ export default function SpecsNew() {
       <PageLayout>
         {/* Left Panel: Specs List */}
         <ResizablePanel defaultWidth={320} minWidth={300} maxWidth={600} className="">
-          {/* Search Bar with Upload Button */}
-          <div className="m-4 mb-2 flex items-center gap-2 flex-shrink-0">
-            <div className="flex-1 glass-card rounded-full px-4 py-2 flex items-center gap-2">
-              <Search size={16} className="text-gray-400 flex-shrink-0" />
-              <input
-                type="text"
-                placeholder="Search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 bg-transparent outline-none text-sm placeholder:text-gray-400"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="p-1 hover:bg-white/50 rounded-full transition-colors"
-                >
-                  <X size={14} className="text-gray-500" />
-                </button>
-              )}
+          {/* Search Bar with Sort and Upload */}
+          <div className="m-4 mb-2 space-y-2 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 glass-card rounded-full px-4 py-2 flex items-center gap-2">
+                <Search size={16} className="text-gray-400 flex-shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-1 bg-transparent outline-none text-sm placeholder:text-gray-400"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="p-1 hover:bg-white/50 rounded-full transition-colors"
+                  >
+                    <X size={14} className="text-gray-500" />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setShowUploadModal(true)}
+                className="glass-panel rounded-full p-2.5 hover:shadow-lg transition-all flex-shrink-0"
+                title="Upload Spec"
+              >
+                <Upload size={18} className="text-purple-600" />
+              </button>
             </div>
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="glass-panel rounded-full p-2.5 hover:shadow-lg transition-all flex-shrink-0"
-              title="Upload Spec"
-            >
-              <Upload size={18} className="text-purple-600" />
-            </button>
+
+            {/* Sort Dropdown */}
+            <div className="relative">
+              <select
+                value={endpointSort}
+                onChange={(e) => setEndpointSort(e.target.value as EndpointSortOption)}
+                className="w-full text-xs bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 appearance-none cursor-pointer hover:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors"
+              >
+                <option value="method">Sort: By Method</option>
+                <option value="path-asc">Sort: Path (A-Z)</option>
+                <option value="path-desc">Sort: Path (Z-A)</option>
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                {endpointSort === 'method' && <ArrowUpDown size={12} className="text-gray-400" />}
+                {endpointSort === 'path-asc' && <ArrowDownAZ size={12} className="text-gray-400" />}
+                {endpointSort === 'path-desc' && <ArrowDownZA size={12} className="text-gray-400" />}
+              </div>
+            </div>
           </div>
 
           <div className="px-4 pb-24">
@@ -812,7 +903,7 @@ export default function SpecsNew() {
                   const specEndpoints = specGroup?.endpoints || []
 
                   // Filter endpoints by search query
-                  const filteredEndpoints = searchQuery
+                  const filtered = searchQuery
                     ? specEndpoints.filter(ep => {
                         const query = searchQuery.toLowerCase()
                         return (
@@ -821,6 +912,9 @@ export default function SpecsNew() {
                         )
                       })
                     : specEndpoints
+
+                  // Sort endpoints
+                  const filteredEndpoints = sortEndpoints(filtered)
 
                   // Count selected endpoints for this spec
                   const selectedCountForSpec = filteredEndpoints.filter(e => selectedEndpointIds.has(e.id!)).length
@@ -1188,6 +1282,18 @@ export default function SpecsNew() {
           }}
         />
       )}
+
+      {/* Test Generation Config Modal */}
+      <TestGenerationConfigModal
+        open={showConfigModal}
+        onOpenChange={setShowConfigModal}
+        selectedEndpointsCount={selectedEndpointIds.size}
+        totalEndpointsCount={specGroups?.find(g => g.spec.id === selectedSpecId)?.endpoints?.length || 0}
+        unselectedEndpoints={
+          specGroups?.find(g => g.spec.id === selectedSpecId)?.endpoints?.filter(e => !selectedEndpointIds.has(e.id!)) || []
+        }
+        onConfirm={handleGenerateWithConfig}
+      />
     </>
   )
 }

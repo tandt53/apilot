@@ -30,13 +30,20 @@ export interface GenerationMetadata {
   tokenLimitReached: boolean
 }
 
+export type ContextMode = 'selected-only' | 'all-reference' | 'unselected-reference'
+
 export interface GenerateTestsOptions {
-  endpoints: Endpoint[]
+  endpoints: Endpoint[] // Endpoints to generate tests for
   spec: any
   maxTestsPerEndpoint?: number
   onProgress?: (progress: { current: number; total: number; test?: Partial<TestCase> }) => void
   onTestGenerated?: (test: Partial<TestCase>) => Promise<void> // Real-time test save callback
   signal?: AbortSignal // For cancellation
+
+  // Context and requirements (new)
+  contextMode?: ContextMode // How to use endpoint context
+  referenceEndpoints?: Endpoint[] // Additional endpoints for context only
+  customRequirements?: string // User's custom instructions for test generation
 
   // For continuation after token limit
   previousMetadata?: GenerationMetadata // Metadata from previous generation attempts
@@ -53,11 +60,33 @@ export interface GenerateTestsResult {
   metadata: GenerationMetadata // Detailed metadata for continuation
 }
 
+export type TestConnectionErrorType =
+  | 'AUTH_ERROR'           // Invalid/expired API key
+  | 'MODEL_NOT_FOUND'      // Model doesn't exist
+  | 'MODEL_NOT_AVAILABLE'  // Model exists but not accessible (quota/tier)
+  | 'RATE_LIMIT'           // Rate limit exceeded
+  | 'NETWORK_ERROR'        // Network/connectivity issues
+  | 'UNSUPPORTED_FEATURE'  // Model doesn't support required features
+  | 'INVALID_CONFIG'       // Configuration error
+  | 'UNKNOWN'              // Other/unknown errors
+
 export interface TestConnectionResult {
   success: boolean
   message: string
   latency?: number
   error?: string
+  errorType?: TestConnectionErrorType
+  suggestedAction?: string // User-friendly guidance to fix the issue
+  availableModels?: string[] // List of available/suggested models
+
+  // Model capability validation
+  capabilityTest?: {
+    score: number // 0-100
+    capable: boolean // true if score >= 70
+    issues: string[] // Critical problems
+    warnings: string[] // Minor issues
+    recommendation: string // User-friendly summary
+  }
 }
 
 /**
