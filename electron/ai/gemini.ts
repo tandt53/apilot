@@ -51,10 +51,37 @@ export class GeminiService extends AIService {
       const text = response.text()
 
       if (text) {
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability } = await import('./model-validator')
+
+        console.log('[Gemini Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResult = await model.generateContent(CAPABILITY_TEST_PROMPT)
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResult.response.text()
+
+        const capabilityValidation = validateModelCapability(capabilityContent)
+
+        console.log('[Gemini Service] Capability test result:', {
+          score: capabilityValidation.score,
+          capable: capabilityValidation.capable,
+          issues: capabilityValidation.issues,
+          warnings: capabilityValidation.warnings,
+          latency: capabilityLatency,
+        })
+
         return {
           success: true,
           message: text,
           latency,
+          capabilityTest: {
+            score: capabilityValidation.score,
+            capable: capabilityValidation.capable,
+            issues: capabilityValidation.issues,
+            warnings: capabilityValidation.warnings,
+            recommendation: capabilityValidation.recommendation,
+          },
         }
       }
 
@@ -64,10 +91,19 @@ export class GeminiService extends AIService {
         error: 'Empty response',
       }
     } catch (error: any) {
+      console.error('[Gemini Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyGeminiError } = await import('./error-detector')
+      const classified = classifyGeminiError(error, this.model)
+
       return {
         success: false,
-        message: 'Failed to connect to Gemini',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }

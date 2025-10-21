@@ -158,6 +158,7 @@ export async function updateOllamaSettings(config: {
   baseUrl?: string
   model?: string
   temperature?: number
+  maxTokens?: number
 }): Promise<void> {
   const settings = await getSettings()
 
@@ -168,6 +169,7 @@ export async function updateOllamaSettings(config: {
         baseUrl: config.baseUrl || 'http://localhost:11434',
         model: config.model || 'llama3.1:8b',
         temperature: config.temperature ?? 0.7,
+        maxTokens: config.maxTokens || 4096,
       },
     },
   })

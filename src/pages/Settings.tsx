@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react'
 import {useSettings, useUpdateSettings} from '@/lib/hooks'
 import {testAIConnection} from '@/lib/ai'
-import {Check, CheckCircle2, Cpu, X} from 'lucide-react'
+import {Check, CheckCircle2, Cpu, X, AlertCircle, Info, Zap} from 'lucide-react'
 import ResizablePanel from '@/components/ResizablePanel'
 import PageLayout from '@/components/PageLayout'
 
@@ -10,7 +10,7 @@ export default function Settings() {
   const updateSettings = useUpdateSettings()
   const [selectedProvider, setSelectedProvider] = useState<'openai' | 'anthropic' | 'gemini' | 'ollama'>('openai')
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, any>>({}) // Store results per provider
   const hasMigrated = useRef(false)
 
   // Form states
@@ -29,6 +29,7 @@ export default function Settings() {
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
   const [ollamaModel, setOllamaModel] = useState('llama3.1:8b')
   const [ollamaTemperature, setOllamaTemperature] = useState(0.7)
+  const [ollamaMaxTokens, setOllamaMaxTokens] = useState(4096)
 
   // Load settings from database when component mounts
   useEffect(() => {
@@ -78,13 +79,15 @@ export default function Settings() {
         setOllamaUrl(settings.aiSettings.ollama.baseUrl)
         setOllamaModel(settings.aiSettings.ollama.model)
         setOllamaTemperature(settings.aiSettings.ollama.temperature ?? 0.7)
+        setOllamaMaxTokens(settings.aiSettings.ollama.maxTokens ?? 4096)
       }
     }
   }, [settings])
 
   const handleTestConnection = async () => {
     setTesting(true)
-    setTestResult(null)
+    // Clear only the current provider's result
+    setTestResults((prev) => ({ ...prev, [selectedProvider]: null }))
 
     try {
       let config: any = {}
@@ -100,7 +103,7 @@ export default function Settings() {
           }
 
           if (!apiKey || apiKey === maskedValue) {
-            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: 'Please enter your API key or save it first' } }))
             setTesting(false)
             return
           }
@@ -116,7 +119,7 @@ export default function Settings() {
           }
 
           if (!apiKey || apiKey === maskedValue) {
-            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: 'Please enter your API key or save it first' } }))
             setTesting(false)
             return
           }
@@ -132,7 +135,7 @@ export default function Settings() {
           }
 
           if (!apiKey || apiKey === maskedValue) {
-            setTestResult({ success: false, message: 'Please enter your API key or save it first' })
+            setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: 'Please enter your API key or save it first' } }))
             setTesting(false)
             return
           }
@@ -146,9 +149,9 @@ export default function Settings() {
       }
 
       const result = await testAIConnection(selectedProvider, config)
-      setTestResult(result)
+      setTestResults((prev) => ({ ...prev, [selectedProvider]: result }))
     } catch (error: any) {
-      setTestResult({ success: false, message: error.message })
+      setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: error.message } }))
     } finally {
       setTesting(false)
     }
@@ -219,7 +222,8 @@ export default function Settings() {
       aiSettings.ollama = {
         baseUrl: ollamaUrl,
         model: ollamaModel,
-        temperature: ollamaTemperature
+        temperature: ollamaTemperature,
+        maxTokens: ollamaMaxTokens
       }
 
       await updateSettings.mutateAsync({
@@ -235,10 +239,13 @@ export default function Settings() {
 
   const providers = [
     { id: 'openai', name: 'OpenAI', desc: 'GPT-4o', enabled: true },
-    { id: 'anthropic', name: 'Claude', desc: 'Claude 3.5 Sonnet', enabled: false },
-    { id: 'gemini', name: 'Gemini', desc: 'Gemini 2.0 Flash', enabled: false },
-    { id: 'ollama', name: 'Custom', desc: 'Ollama, LM Studio, etc.', enabled: false },
+    { id: 'anthropic', name: 'Anthropic', desc: 'Claude 3.5 Sonnet', enabled: true },
+    { id: 'gemini', name: 'Gemini', desc: 'Gemini 2.0 Flash', enabled: true },
+    { id: 'ollama', name: 'Custom', desc: 'Ollama, LM Studio, etc.', enabled: true },
   ]
+
+  // Get test result for currently selected provider
+  const testResult = testResults[selectedProvider]
 
   return (
     <PageLayout>
@@ -506,11 +513,24 @@ export default function Settings() {
               />
               <p className="text-xs text-gray-500 mt-1">Controls randomness (0.0 = deterministic, 2.0 = very creative). Default: 0.7</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Tokens</label>
+              <input
+                type="number"
+                value={ollamaMaxTokens}
+                onChange={(e) => setOllamaMaxTokens(parseInt(e.target.value))}
+                min="512"
+                max="32768"
+                step="512"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">Maximum tokens to generate (depends on model's context window). Default: 4096</p>
+            </div>
           </div>
         )}
 
             {/* Test Connection Button */}
-            <div className="mt-6 flex items-center gap-3">
+            <div className="mt-6">
               <button
                 onClick={handleTestConnection}
                 disabled={testing}
@@ -519,10 +539,151 @@ export default function Settings() {
                 {testing ? 'Testing...' : 'Test Connection'}
               </button>
 
+              {/* Test Result Display */}
               {testResult && (
-                <div className={`flex items-center gap-2 text-sm ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
-                  {testResult.success ? <Check size={16} /> : <X size={16} />}
-                  <span>{testResult.message}</span>
+                <div className={`mt-4 p-4 rounded-xl border-2 ${
+                  testResult.success
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  {/* Success message */}
+                  {testResult.success && (
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3">
+                        <Check size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-green-900">{testResult.message}</p>
+                          {testResult.latency && (
+                            <p className="text-xs text-green-700 mt-1">Response time: {testResult.latency}ms</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Model Capability Results */}
+                      {(testResult as any).capabilityTest && (
+                        <div className={`p-3 rounded-lg border-2 ${
+                          (testResult as any).capabilityTest.capable
+                            ? 'bg-green-50 border-green-300'
+                            : (testResult as any).capabilityTest.score >= 50
+                              ? 'bg-yellow-50 border-yellow-300'
+                              : 'bg-orange-50 border-orange-300'
+                        }`}>
+                          <div className="flex items-start gap-3 mb-2">
+                            {(testResult as any).capabilityTest.capable ? (
+                              <CheckCircle2 size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+                            ) : (
+                              <AlertCircle size={16} className={`flex-shrink-0 mt-0.5 ${
+                                (testResult as any).capabilityTest.score >= 50 ? 'text-yellow-600' : 'text-orange-600'
+                              }`} />
+                            )}
+                            <div className="flex-1">
+                              <p className={`text-xs font-semibold ${
+                                (testResult as any).capabilityTest.capable
+                                  ? 'text-green-900'
+                                  : (testResult as any).capabilityTest.score >= 50
+                                    ? 'text-yellow-900'
+                                    : 'text-orange-900'
+                              }`}>
+                                Model Capability: {(testResult as any).capabilityTest.score}/100
+                              </p>
+                              <p className={`text-xs mt-1 ${
+                                (testResult as any).capabilityTest.capable
+                                  ? 'text-green-700'
+                                  : (testResult as any).capabilityTest.score >= 50
+                                    ? 'text-yellow-700'
+                                    : 'text-orange-700'
+                              }`}>
+                                {(testResult as any).capabilityTest.recommendation}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Issues */}
+                          {(testResult as any).capabilityTest.issues.length > 0 && (
+                            <div className="mt-2 pl-2 border-l-2 border-orange-400">
+                              <p className="text-xs font-medium text-orange-900 mb-1">Critical issues:</p>
+                              <ul className="text-xs text-orange-800 space-y-0.5">
+                                {(testResult as any).capabilityTest.issues.map((issue: string, idx: number) => (
+                                  <li key={idx}>• {issue}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {/* Warnings */}
+                          {(testResult as any).capabilityTest.warnings.length > 0 && (
+                            <div className="mt-2 pl-2 border-l-2 border-yellow-400">
+                              <p className="text-xs font-medium text-yellow-900 mb-1">Warnings:</p>
+                              <ul className="text-xs text-yellow-800 space-y-0.5">
+                                {(testResult as any).capabilityTest.warnings.map((warning: string, idx: number) => (
+                                  <li key={idx}>• {warning}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Error message */}
+                  {!testResult.success && (
+                    <div className="space-y-3">
+                      {/* Error header */}
+                      <div className="flex items-start gap-3">
+                        <X size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-red-900">{testResult.message}</p>
+                          {(testResult as any).errorType && (
+                            <p className="text-xs text-red-700 mt-1">
+                              Error type: {(testResult as any).errorType?.replace(/_/g, ' ')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Suggested action */}
+                      {(testResult as any).suggestedAction && (
+                        <div className="flex items-start gap-3 pl-2 border-l-2 border-red-300">
+                          <AlertCircle size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-xs font-medium text-red-800 mb-1">How to fix:</p>
+                            <p className="text-xs text-red-700">{(testResult as any).suggestedAction}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Available models */}
+                      {(testResult as any).availableModels && (testResult as any).availableModels.length > 0 && (
+                        <div className="flex items-start gap-3 pl-2 border-l-2 border-blue-300 bg-blue-50 p-3 rounded-lg">
+                          <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-xs font-medium text-blue-900 mb-2">Available models:</p>
+                            <ul className="text-xs text-blue-800 space-y-1">
+                              {(testResult as any).availableModels.map((model: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <Zap size={12} className="flex-shrink-0 mt-0.5 text-blue-600" />
+                                  <span>{model}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Technical details (collapsible) */}
+                      {testResult.error && testResult.error !== testResult.message && (
+                        <details className="text-xs">
+                          <summary className="cursor-pointer text-red-700 hover:text-red-900 font-medium">
+                            Technical details
+                          </summary>
+                          <pre className="mt-2 p-2 bg-red-100 rounded text-red-800 overflow-x-auto">
+                            {testResult.error}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

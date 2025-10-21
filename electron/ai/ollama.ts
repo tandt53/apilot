@@ -18,6 +18,7 @@ export interface OllamaConfig {
   baseUrl?: string
   model?: string
   temperature?: number
+  maxTokens?: number
 }
 
 export class OllamaService extends AIService {
@@ -25,6 +26,7 @@ export class OllamaService extends AIService {
   private client: Ollama
   private model: string
   private temperature: number
+  private maxTokens: number
 
   constructor(config: OllamaConfig) {
     super()
@@ -33,6 +35,7 @@ export class OllamaService extends AIService {
     })
     this.model = config.model || 'llama3.1:8b'
     this.temperature = config.temperature ?? 0.7
+    this.maxTokens = config.maxTokens || 4096
   }
 
   /**
@@ -68,10 +71,44 @@ export class OllamaService extends AIService {
       const latency = Date.now() - startTime
 
       if (response.response) {
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability } = await import('./model-validator')
+
+        console.log('[Ollama Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResponse = await this.client.generate({
+          model: this.model,
+          prompt: CAPABILITY_TEST_PROMPT,
+          options: {
+            num_predict: 500,
+          },
+        })
+
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResponse.response || ''
+
+        const capabilityResult = validateModelCapability(capabilityContent)
+
+        console.log('[Ollama Service] Capability test result:', {
+          score: capabilityResult.score,
+          capable: capabilityResult.capable,
+          issues: capabilityResult.issues,
+          warnings: capabilityResult.warnings,
+          latency: capabilityLatency,
+        })
+
         return {
           success: true,
           message: response.response,
           latency,
+          capabilityTest: {
+            score: capabilityResult.score,
+            capable: capabilityResult.capable,
+            issues: capabilityResult.issues,
+            warnings: capabilityResult.warnings,
+            recommendation: capabilityResult.recommendation,
+          },
         }
       }
 
@@ -81,10 +118,19 @@ export class OllamaService extends AIService {
         error: 'Empty response',
       }
     } catch (error: any) {
+      console.error('[Ollama Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyOllamaError } = await import('./error-detector')
+      const classified = classifyOllamaError(error, this.model, this.client.host || 'http://localhost:11434')
+
       return {
         success: false,
-        message: 'Failed to connect to Ollama',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }
@@ -137,7 +183,7 @@ export class OllamaService extends AIService {
         stream: true,
         options: {
           temperature: this.temperature,
-          num_predict: 4096,
+          num_predict: this.maxTokens,
         },
       })
 

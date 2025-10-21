@@ -63,10 +63,47 @@ export class AnthropicService extends AIService {
         const content = response.content[0]
         const message = content.type === 'text' ? content.text : 'Connected successfully'
 
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability } = await import('./model-validator')
+
+        console.log('[Anthropic Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResponse = await this.client.messages.create({
+          model: this.model,
+          max_tokens: 500,
+          messages: [
+            {
+              role: 'user',
+              content: CAPABILITY_TEST_PROMPT,
+            },
+          ],
+        })
+
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResponse.content[0]?.type === 'text' ? capabilityResponse.content[0].text : ''
+
+        const capabilityResult = validateModelCapability(capabilityContent)
+
+        console.log('[Anthropic Service] Capability test result:', {
+          score: capabilityResult.score,
+          capable: capabilityResult.capable,
+          issues: capabilityResult.issues,
+          warnings: capabilityResult.warnings,
+          latency: capabilityLatency,
+        })
+
         return {
           success: true,
           message,
           latency,
+          capabilityTest: {
+            score: capabilityResult.score,
+            capable: capabilityResult.capable,
+            issues: capabilityResult.issues,
+            warnings: capabilityResult.warnings,
+            recommendation: capabilityResult.recommendation,
+          },
         }
       }
 
@@ -76,10 +113,19 @@ export class AnthropicService extends AIService {
         error: 'Empty response',
       }
     } catch (error: any) {
+      console.error('[Anthropic Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyAnthropicError } = await import('./error-detector')
+      const classified = classifyAnthropicError(error, this.model)
+
       return {
         success: false,
-        message: 'Failed to connect to Anthropic',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }

@@ -359,6 +359,7 @@ export interface AISettings {
     baseUrl: string // Default: "http://localhost:11434"
     model: string // Default: "llama3.1:8b"
     temperature: number
+    maxTokens: number // Default: 4096
   }
 }
 

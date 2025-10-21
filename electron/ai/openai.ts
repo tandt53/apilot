@@ -66,10 +66,54 @@ export class OpenAIService extends AIService {
 
       if (response.choices && response.choices.length > 0) {
         console.log('[OpenAI Service] Test connection successful, latency:', latency)
+
+        // Run capability test
+        const { CAPABILITY_TEST_PROMPT, validateModelCapability, checkModelCompatibility } = await import('./model-validator')
+
+        console.log('[OpenAI Service] Running capability test...')
+        const capabilityStartTime = Date.now()
+
+        const capabilityResponse = await this.client.chat.completions.create({
+          model: this.model,
+          messages: [
+            {
+              role: 'user',
+              content: CAPABILITY_TEST_PROMPT,
+            },
+          ],
+          max_completion_tokens: 500,
+        })
+
+        const capabilityLatency = Date.now() - capabilityStartTime
+        const capabilityContent = capabilityResponse.choices[0]?.message?.content || ''
+
+        const capabilityResult = validateModelCapability(capabilityContent)
+
+        console.log('[OpenAI Service] Capability test result:', {
+          score: capabilityResult.score,
+          capable: capabilityResult.capable,
+          issues: capabilityResult.issues,
+          warnings: capabilityResult.warnings,
+          latency: capabilityLatency,
+        })
+
+        // Check for known problematic models
+        const compatibilityCheck = checkModelCompatibility(this.model, 'openai')
+        if (compatibilityCheck.isProblematic) {
+          console.warn('[OpenAI Service] Model compatibility warning:', compatibilityCheck.warning)
+        }
+
         return {
           success: true,
           message: response.choices[0].message.content || 'Connected successfully',
           latency,
+          capabilityTest: {
+            score: capabilityResult.score,
+            capable: capabilityResult.capable,
+            issues: capabilityResult.issues,
+            warnings: capabilityResult.warnings,
+            recommendation: capabilityResult.recommendation,
+          },
         }
       }
 
@@ -80,10 +124,18 @@ export class OpenAIService extends AIService {
       }
     } catch (error: any) {
       console.error('[OpenAI Service] Test connection failed:', error)
+
+      // Use error detector for detailed classification
+      const { classifyOpenAIError } = await import('./error-detector')
+      const classified = classifyOpenAIError(error, this.model)
+
       return {
         success: false,
-        message: 'Failed to connect to OpenAI',
+        message: classified.message,
         error: error.message || String(error),
+        errorType: classified.errorType,
+        suggestedAction: classified.suggestedAction,
+        availableModels: classified.availableModels,
       }
     }
   }
