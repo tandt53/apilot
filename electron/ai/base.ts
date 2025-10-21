@@ -30,13 +30,20 @@ export interface GenerationMetadata {
   tokenLimitReached: boolean
 }
 
+export type ContextMode = 'selected-only' | 'all-reference' | 'unselected-reference'
+
 export interface GenerateTestsOptions {
-  endpoints: Endpoint[]
+  endpoints: Endpoint[] // Endpoints to generate tests for
   spec: any
   maxTestsPerEndpoint?: number
   onProgress?: (progress: { current: number; total: number; test?: Partial<TestCase> }) => void
   onTestGenerated?: (test: Partial<TestCase>) => Promise<void> // Real-time test save callback
   signal?: AbortSignal // For cancellation
+
+  // Context and requirements (new)
+  contextMode?: ContextMode // How to use endpoint context
+  referenceEndpoints?: Endpoint[] // Additional endpoints for context only
+  customRequirements?: string // User's custom instructions for test generation
 
   // For continuation after token limit
   previousMetadata?: GenerationMetadata // Metadata from previous generation attempts

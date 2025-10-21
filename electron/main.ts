@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'path'
 import fs from 'fs/promises'
+import axios from 'axios'
+import FormData from 'form-data'
 
 // Import AI services
 import { OpenAIService } from './ai/openai'
@@ -196,8 +198,10 @@ ipcMain.handle('generate-tests', async (event, provider, config, options) => {
     console.log(`[Main] Generating tests with ${provider}`)
     console.log(`[Main] Config:`, { ...config, apiKey: config.apiKey?.substring(0, 10) + '...' })
     console.log(`[Main] Endpoints count:`, options.endpoints?.length)
+    console.log(`[Main] Reference endpoints count:`, options.referenceEndpoints?.length || 0)
+    console.log(`[Main] Custom requirements:`, options.customRequirements ? 'Yes' : 'No')
 
-    const { endpoints, spec, previousMetadata } = options
+    const { endpoints, spec, previousMetadata, referenceEndpoints, customRequirements } = options
 
     if (previousMetadata) {
       console.log('[Main] 📥 RECEIVED previousMetadata:', {
@@ -230,6 +234,8 @@ ipcMain.handle('generate-tests', async (event, provider, config, options) => {
       endpoints,
       spec,
       previousMetadata,
+      referenceEndpoints,
+      customRequirements,
       signal: currentGenerationAbortController.signal,
       onProgress: (progress) => {
         event.sender.send('generate-tests-progress', progress)
@@ -296,5 +302,128 @@ ipcMain.handle('cancel-generation', async () => {
   } else {
     console.log('[Main] No ongoing generation to cancel')
     return { success: false, message: 'No ongoing generation' }
+  }
+})
+
+// Execute HTTP test request
+ipcMain.handle('execute-test', async (_event, testRequest) => {
+  const startTime = Date.now()
+
+  try {
+    console.log('[Main] Executing test request:', {
+      method: testRequest.method,
+      url: testRequest.url,
+      hasFormData: !!testRequest.formData,
+      hasBody: !!testRequest.body
+    })
+
+    const { url, method, headers, formData, body } = testRequest
+
+    // Build axios config
+    const config: any = {
+      method: method.toLowerCase(),
+      url,
+      headers: headers || {},
+      validateStatus: () => true, // Accept all status codes
+      // Disable SSL verification for development/testing
+      httpsAgent: new (require('https').Agent)({
+        rejectUnauthorized: false
+      })
+    }
+
+    // Handle request body
+    if (formData && Object.keys(formData).length > 0) {
+      // Handle multipart/form-data with file uploads
+      const form = new FormData()
+
+      for (const [key, value] of Object.entries(formData)) {
+        if (value && typeof value === 'string' && value.startsWith('/')) {
+          // This looks like a file path, try to read the file
+          try {
+            const fileBuffer = await fs.readFile(value)
+            const fileName = path.basename(value)
+            form.append(key, fileBuffer, fileName)
+            console.log('[Main] Added file to form:', { key, fileName })
+          } catch (error) {
+            console.error('[Main] Failed to read file:', value, error)
+            // If file read fails, append as string value
+            form.append(key, value as string)
+          }
+        } else if (value !== null && value !== undefined) {
+          // Regular form field
+          form.append(key, value as string)
+        }
+      }
+
+      config.data = form
+      // Let form-data set the correct Content-Type with boundary
+      config.headers = {
+        ...config.headers,
+        ...form.getHeaders()
+      }
+    } else if (body) {
+      // Handle JSON or other body types
+      if (typeof body === 'string') {
+        config.data = body
+      } else {
+        config.data = body
+      }
+    }
+
+    // Execute request
+    const response = await axios(config)
+    const responseTime = Date.now() - startTime
+
+    console.log('[Main] Test request completed:', {
+      status: response.status,
+      statusText: response.statusText,
+      responseTime: `${responseTime}ms`
+    })
+
+    // Return response in format expected by RequestTester
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      data: response.data,
+      responseTime
+    }
+  } catch (error: any) {
+    const responseTime = Date.now() - startTime
+    console.error('[Main] Test request error:', error.message)
+
+    // If error has response (HTTP error), return it
+    if (error.response) {
+      return {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        headers: error.response.headers,
+        data: error.response.data,
+        responseTime
+      }
+    }
+
+    // Network or other error - provide user-friendly message
+    let errorMessage = error.message || 'Request failed'
+
+    // DNS resolution errors
+    if (error.code === 'ENOTFOUND' || errorMessage.includes('getaddrinfo ENOTFOUND')) {
+      const hostname = error.hostname || testRequest.url.replace(/^https?:\/\/([^/]+).*/, '$1')
+      errorMessage = `DNS Resolution Failed: Cannot resolve hostname "${hostname}"\n\nThe domain does not exist or cannot be found.\n\nSuggestions:\n• Check if the URL is correct\n• Use a real API endpoint instead of example URLs\n• Configure an environment with the correct base URL`
+    }
+    // Connection refused errors
+    else if (error.code === 'ECONNREFUSED' || errorMessage.includes('ECONNREFUSED')) {
+      errorMessage = `Connection Refused: Cannot connect to the server\n\nThe server is not accepting connections.\n\nSuggestions:\n• Check if the server is running\n• Verify the port number is correct\n• Check firewall settings`
+    }
+    // Timeout errors
+    else if (error.code === 'ETIMEDOUT' || errorMessage.includes('timeout')) {
+      errorMessage = `Request Timeout: The server took too long to respond\n\nSuggestions:\n• Check your internet connection\n• The server might be slow or overloaded\n• Try increasing the request timeout`
+    }
+    // Certificate errors
+    else if (errorMessage.includes('certificate') || errorMessage.includes('SSL')) {
+      errorMessage = `SSL Certificate Error: ${error.message}\n\nNote: Self-signed certificates are already allowed in this application.`
+    }
+
+    throw new Error(errorMessage)
   }
 })

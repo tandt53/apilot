@@ -9,11 +9,19 @@
  */
 export const TEST_GENERATION_PROMPT = `You are an expert API testing engineer. Generate comprehensive, executable test cases from the provided endpoint specifications.
 
-Enhanced Endpoints:
-{endpoints_json}
+---
 
-API Specification:
+## INPUT SPECIFICATIONS
+
+### API Specification
 {spec_json}
+
+### Target Endpoints (Generate tests for these)
+{endpoints_json}
+{reference_endpoints}
+{custom_requirements}
+
+---
 
 **CRITICAL OUTPUT FORMAT:**
 - Output ONLY \`\`\`json code blocks, NO explanatory text or titles
@@ -443,8 +451,15 @@ export function formatEndpointsForPrompt(endpoints: any[]): string {
 
 /**
  * Format spec for AI prompt (simplified)
+ * Only include spec when there are reference endpoints
  */
-export function formatSpecForPrompt(spec: any): string {
+export function formatSpecForPrompt(spec: any, hasReferenceEndpoints: boolean): string {
+  // If no reference endpoints, return empty string (selected-only mode)
+  if (!hasReferenceEndpoints) {
+    console.log('[Prompt Formatter] API Specification: SKIPPED (no reference endpoints)')
+    return ''
+  }
+
   const formatted = {
     openapi: spec.openapi || spec.swagger,
     info: spec.info,
@@ -462,4 +477,62 @@ export function formatSpecForPrompt(spec: any): string {
   })
 
   return result
+}
+
+/**
+ * Format reference endpoints for AI prompt
+ * These endpoints provide additional context but should NOT have tests generated for them
+ */
+export function formatReferenceEndpointsForPrompt(referenceEndpoints: any[]): string {
+  if (!referenceEndpoints || referenceEndpoints.length === 0) {
+    return ''
+  }
+
+  const formatted = referenceEndpoints.map(endpoint => ({
+    method: endpoint.method,
+    path: endpoint.path,
+    name: endpoint.name,
+    description: endpoint.description,
+    request: endpoint.request,
+    responses: endpoint.responses,
+    auth: endpoint.auth,
+  }))
+
+  const result = JSON.stringify(formatted, null, 2)
+
+  console.log('[Prompt Formatter] Reference Endpoints (context only, no tests):', {
+    count: referenceEndpoints.length,
+    endpoints: formatted.map((e: any) => `${e.method} ${e.path}`),
+    preview: result.substring(0, 500),
+  })
+
+  return `
+
+**REFERENCE ENDPOINTS** (For workflow context - do NOT generate single tests for these, but DO use them in workflow tests with target endpoints):
+${result}
+
+IMPORTANT: While you should NOT generate individual functional/validation/security tests for reference endpoints, you SHOULD analyze them together with target endpoints to identify workflow patterns (CRUD lifecycles, authentication flows, parent-child relationships) and generate workflow tests that span across target and reference endpoints.
+`
+}
+
+/**
+ * Format custom user requirements for AI prompt
+ */
+export function formatCustomRequirementsForPrompt(customRequirements?: string): string {
+  if (!customRequirements || !customRequirements.trim()) {
+    return ''
+  }
+
+  console.log('[Prompt Formatter] Custom Requirements:', {
+    length: customRequirements.length,
+    preview: customRequirements.substring(0, 200),
+  })
+
+  return `
+
+**CUSTOM USER REQUIREMENTS:**
+${customRequirements.trim()}
+
+Please incorporate these requirements into your test generation strategy.
+`
 }

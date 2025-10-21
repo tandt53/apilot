@@ -5,7 +5,14 @@
 import OpenAI from 'openai'
 import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type TestConnectionResult} from './base'
-import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
+import {
+  formatEndpointsForPrompt,
+  formatSpecForPrompt,
+  formatReferenceEndpointsForPrompt,
+  formatCustomRequirementsForPrompt,
+  TEST_CONNECTION_PROMPT,
+  TEST_GENERATION_PROMPT
+} from './prompts'
 
 export interface OpenAIConfig {
   apiKey: string
@@ -85,7 +92,7 @@ export class OpenAIService extends AIService {
    * Generate test cases from endpoints (with streaming and real-time save)
    */
   async generateTests(options: GenerateTestsOptions): Promise<import('./base').GenerateTestsResult> {
-    const { endpoints, spec, onProgress, onTestGenerated, signal, previousMetadata } = options
+    const { endpoints, spec, onProgress, onTestGenerated, signal, previousMetadata, referenceEndpoints, customRequirements } = options
 
     if (endpoints.length === 0) {
       return {
@@ -105,11 +112,21 @@ export class OpenAIService extends AIService {
       }
     }
 
-    // Format prompt - if continuing, include summary of what was already done
-    let prompt = TEST_GENERATION_PROMPT.replace(
-      '{endpoints_json}',
-      formatEndpointsForPrompt(endpoints)
-    ).replace('{spec_json}', formatSpecForPrompt(spec))
+    console.log('[OpenAI Service] Starting test generation for', endpoints.length, 'endpoints')
+    if (referenceEndpoints && referenceEndpoints.length > 0) {
+      console.log('[OpenAI Service] Including', referenceEndpoints.length, 'reference endpoints for context')
+    }
+    if (customRequirements) {
+      console.log('[OpenAI Service] Custom requirements provided:', customRequirements.substring(0, 100))
+    }
+
+    // Format prompt with new options - if continuing, include summary of what was already done
+    const hasReferenceEndpoints = !!(referenceEndpoints && referenceEndpoints.length > 0)
+    let prompt = TEST_GENERATION_PROMPT
+      .replace('{endpoints_json}', formatEndpointsForPrompt(endpoints))
+      .replace('{spec_json}', formatSpecForPrompt(spec, hasReferenceEndpoints))
+      .replace('{reference_endpoints}', formatReferenceEndpointsForPrompt(referenceEndpoints || []))
+      .replace('{custom_requirements}', formatCustomRequirementsForPrompt(customRequirements))
 
     // If continuing generation, prepend context about what was already done
     if (previousMetadata) {

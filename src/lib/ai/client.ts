@@ -132,6 +132,8 @@ export async function generateTestsViaIPC(options: any): Promise<any> {
             endpoints: options.endpoints,
             spec: options.spec,
             previousMetadata: options.previousMetadata,
+            referenceEndpoints: options.referenceEndpoints,
+            customRequirements: options.customRequirements,
         })
 
         console.log('[IPC Client] Received result:', {

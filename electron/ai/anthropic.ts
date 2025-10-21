@@ -5,7 +5,14 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {TestCase} from '../../src/types/database'
 import {AIService, type GenerateTestsOptions, type GenerateTestsResult, type TestConnectionResult} from './base'
-import {formatEndpointsForPrompt, formatSpecForPrompt, TEST_CONNECTION_PROMPT, TEST_GENERATION_PROMPT} from './prompts'
+import {
+  formatEndpointsForPrompt,
+  formatSpecForPrompt,
+  formatReferenceEndpointsForPrompt,
+  formatCustomRequirementsForPrompt,
+  TEST_CONNECTION_PROMPT,
+  TEST_GENERATION_PROMPT
+} from './prompts'
 
 export interface AnthropicConfig {
   apiKey: string
@@ -81,7 +88,7 @@ export class AnthropicService extends AIService {
    * Generate test cases from endpoints
    */
   async generateTests(options: GenerateTestsOptions): Promise<GenerateTestsResult> {
-    const { endpoints, spec, onProgress, onTestGenerated, signal } = options
+    const { endpoints, spec, onProgress, onTestGenerated, signal, referenceEndpoints, customRequirements } = options
 
     if (endpoints.length === 0) {
       return {
@@ -102,12 +109,20 @@ export class AnthropicService extends AIService {
     }
 
     console.log('[Anthropic Service] Starting test generation for', endpoints.length, 'endpoints')
+    if (referenceEndpoints && referenceEndpoints.length > 0) {
+      console.log('[Anthropic Service] Including', referenceEndpoints.length, 'reference endpoints for context')
+    }
+    if (customRequirements) {
+      console.log('[Anthropic Service] Custom requirements provided:', customRequirements.substring(0, 100))
+    }
 
-    // Format prompt
-    const prompt = TEST_GENERATION_PROMPT.replace(
-      '{endpoints_json}',
-      formatEndpointsForPrompt(endpoints)
-    ).replace('{spec_json}', formatSpecForPrompt(spec))
+    // Format prompt with new options
+    const hasReferenceEndpoints = !!(referenceEndpoints && referenceEndpoints.length > 0)
+    const prompt = TEST_GENERATION_PROMPT
+      .replace('{endpoints_json}', formatEndpointsForPrompt(endpoints))
+      .replace('{spec_json}', formatSpecForPrompt(spec, hasReferenceEndpoints))
+      .replace('{reference_endpoints}', formatReferenceEndpointsForPrompt(referenceEndpoints || []))
+      .replace('{custom_requirements}', formatCustomRequirementsForPrompt(customRequirements))
 
     try {
       // Use streaming for better UX

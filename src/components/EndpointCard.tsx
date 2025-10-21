@@ -9,6 +9,7 @@ interface EndpointCardProps {
   isChecked?: boolean
   onCheckboxChange?: (checked: boolean) => void
   disabled?: boolean
+  hideEndpointInfo?: boolean // Hide method/path (for grouped display)
 }
 
 const methodColors: Record<string, string> = {
@@ -19,7 +20,7 @@ const methodColors: Record<string, string> = {
   PATCH: 'bg-purple-100 text-purple-700',
 }
 
-export default function EndpointCard({ method, path, name, stepCount, isSelected, onClick, showCheckbox, isChecked, onCheckboxChange, disabled }: EndpointCardProps) {
+export default function EndpointCard({ method, path, name, stepCount, isSelected, onClick, showCheckbox, isChecked, onCheckboxChange, disabled, hideEndpointInfo }: EndpointCardProps) {
   return (
     <button
       onClick={onClick}
@@ -31,22 +32,27 @@ export default function EndpointCard({ method, path, name, stepCount, isSelected
     >
       <div className="flex items-center gap-2">
         <div className="flex-1 min-w-0">
+          {/* Show name and step count if available */}
           {name && (
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <p className="text-sm font-semibold text-gray-900 truncate">{name}</p>
               {stepCount !== undefined && (
                 <span className="text-xs text-gray-500 flex-shrink-0">({stepCount} steps)</span>
               )}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0 ${methodColors[method] || 'bg-gray-100 text-gray-700'}`}>
-              {method}
-            </span>
-            <span className="text-xs font-mono text-gray-600 truncate">
-              {path}
-            </span>
-          </div>
+
+          {/* Only show method/path if not hidden */}
+          {!hideEndpointInfo && (
+            <div className={`flex items-center gap-2 ${name ? 'mt-1' : ''}`}>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0 ${methodColors[method] || 'bg-gray-100 text-gray-700'}`}>
+                {method}
+              </span>
+              <span className="text-xs font-mono text-gray-600 truncate">
+                {path}
+              </span>
+            </div>
+          )}
         </div>
         {showCheckbox && (
           <input

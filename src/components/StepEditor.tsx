@@ -12,6 +12,9 @@ interface StepEditorProps {
   steps: TestStep[]
   onStepsChange: (steps: TestStep[]) => void
   environment?: Environment
+  environments?: Environment[]
+  selectedEnvId?: string | null
+  onEnvChange?: (envId: string | null) => void
   mode: 'view' | 'edit'
   specId?: string
 }
@@ -20,6 +23,9 @@ export default function StepEditor({
   steps,
   onStepsChange,
   environment,
+  environments,
+  selectedEnvId,
+  onEnvChange,
   mode,
   specId
 }: StepEditorProps) {
@@ -290,6 +296,9 @@ export default function StepEditor({
                       readOnly={mode === 'view'}
                       specId={specId}
                       selectedEnv={environment}
+                      environments={environments}
+                      selectedEnvId={selectedEnvId}
+                      onEnvChange={onEnvChange}
                       defaultAssertions={step.assertions}
                     />
                   )

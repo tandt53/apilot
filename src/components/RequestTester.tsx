@@ -6,6 +6,7 @@ import ResponseDisplay from './ResponseDisplay'
 import AssertionsSection from './AssertionsSection'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
+import {substituteBuiltInVariables} from '@/utils/variables'
 
 interface Assertion {
     type: string
@@ -463,7 +464,11 @@ export default function RequestTester({
     }, [hasChanges, onHasChanges])
 
     const substituteVariables = (text: string, variables: Record<string, string>): string => {
-        let result = text
+        // First pass: substitute built-in dynamic variables ({{$variableName}})
+        // Import is at top of file
+        let result = substituteBuiltInVariables(text)
+
+        // Second pass: substitute environment variables ({{variableName}})
         Object.entries(variables).forEach(([key, value]) => {
             result = result.replace(new RegExp(`{{${key}}}`, 'g'), value)
         })
@@ -482,9 +487,8 @@ export default function RequestTester({
 
             const envVariables = selectedEnv?.variables || {}
 
-            if (Object.keys(envVariables).length > 0) {
-                requestUrl = substituteVariables(requestUrl, envVariables)
-            }
+            // Always substitute variables (built-in + environment)
+            requestUrl = substituteVariables(requestUrl, envVariables)
 
             if (selectedEnv?.baseUrl) {
                 const urlObj = new URL(requestUrl)
@@ -506,7 +510,15 @@ export default function RequestTester({
                 substitutedHeaders[key] = substituteVariables(value, envVariables)
             })
 
-            const finalHeaders = {...substitutedHeaders, ...(selectedEnv?.headers || {})}
+            // Substitute variables in environment headers as well
+            const substitutedEnvHeaders: Record<string, string> = {}
+            if (selectedEnv?.headers) {
+                Object.entries(selectedEnv.headers).forEach(([key, value]) => {
+                    substitutedEnvHeaders[key] = substituteVariables(String(value), envVariables)
+                })
+            }
+
+            const finalHeaders = {...substitutedHeaders, ...substitutedEnvHeaders}
 
             // Log request details for debugging
             console.group('🚀 API Request')
@@ -518,66 +530,67 @@ export default function RequestTester({
             if (Object.keys(formData).length > 0) console.log('Form Data:', formData)
             console.groupEnd()
 
+            // Prepare request data for IPC
+            let requestBody = undefined
+            let requestFormData = undefined
+
+            if (method !== 'GET' && method !== 'HEAD') {
+                const contentType = finalHeaders['Content-Type'] || ''
+
+                if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+                    // Use form data for multipart/urlencoded
+                    requestFormData = formData
+                    // Remove Content-Type to let the backend set it with boundary
+                    delete finalHeaders['Content-Type']
+                } else if (body) {
+                    // Use JSON or other body types
+                    requestBody = substituteVariables(body, envVariables)
+                }
+            }
+
+            // Use IPC to execute test in main process (better security, no CORS, file upload support)
+            if (window.electron) {
+                const result = await window.electron.executeTest({
+                    url: requestUrl,
+                    method,
+                    headers: finalHeaders,
+                    formData: requestFormData,
+                    body: requestBody
+                })
+
+                const endTime = Date.now()
+                const responseTime = result.responseTime || (endTime - startTime)
+                setResponseTime(responseTime)
+
+                // Log response details for debugging
+                console.group('✅ API Response (IPC)')
+                console.log('Status:', result.status, result.statusText)
+                console.log('Response Time:', responseTime, 'ms')
+                console.log('Headers:', result.headers)
+                console.log('Data:', result.data)
+                console.groupEnd()
+
+                setResponse(result)
+                return
+            }
+
+            // Fallback to fetch if Electron API is not available (web mode)
+            console.warn('[RequestTester] Electron API not available, falling back to fetch')
             const fetchOptions: RequestInit = {
                 method,
                 headers: finalHeaders,
             }
 
-            // Handle body based on content type
-            if (method !== 'GET' && method !== 'HEAD') {
-                const contentType = finalHeaders['Content-Type'] || ''
-
-                if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-                    // Check if any file paths exist (for validation only - actual file reading happens in backend)
-                    const fileFields: string[] = []
-                    const missingFiles: string[] = []
-
-                    if (endpoint.request?.body?.fields) {
-                        for (const field of endpoint.request.body.fields) {
-                            if (field.type === 'file' && formData[field.name]) {
-                                fileFields.push(field.name)
-                                // Validate file path exists (Electron will handle actual reading)
-                                if (window.electron && formData[field.name]) {
-                                    // Note: We'll validate in the IPC handler
-                                    // For now, just mark that we have file paths
-                                }
-                            }
-                        }
+            if (requestFormData && Object.keys(requestFormData).length > 0) {
+                const formDataObj = new FormData()
+                Object.entries(requestFormData).forEach(([key, value]) => {
+                    if (value !== null && value !== undefined) {
+                        formDataObj.append(key, String(value))
                     }
-
-                    if (missingFiles.length > 0) {
-                        throw new Error(`The following files could not be found:\n${missingFiles.join('\n')}`)
-                    }
-
-                    // Use IPC for multipart/form-data requests with files
-                    if (window.electron && fileFields.length > 0) {
-                        const result = await window.electron.executeTest({
-                            url: requestUrl,
-                            method,
-                            headers: finalHeaders,
-                            formData
-                        })
-
-                        const endTime = Date.now()
-                        setResponseTime(endTime - startTime)
-                        setResponse(result)
-                        return
-                    }
-
-                    // For form data without files or web version, use fetch with FormData
-                    const formDataObj = new FormData()
-                    Object.entries(formData).forEach(([key, value]) => {
-                        if (value !== null && value !== undefined) {
-                            formDataObj.append(key, String(value))
-                        }
-                    })
-                    fetchOptions.body = formDataObj
-                    // Remove Content-Type to let browser set it with boundary
-                    delete finalHeaders['Content-Type']
-                } else if (body) {
-                    const substitutedBody = substituteVariables(body, envVariables)
-                    fetchOptions.body = substitutedBody
-                }
+                })
+                fetchOptions.body = formDataObj
+            } else if (requestBody) {
+                fetchOptions.body = requestBody
             }
 
             const res = await fetch(requestUrl, fetchOptions)
@@ -601,7 +614,7 @@ export default function RequestTester({
             }
 
             // Log response details for debugging
-            console.group('✅ API Response')
+            console.group('✅ API Response (Fetch)')
             console.log('Status:', res.status, res.statusText)
             console.log('Response Time:', endTime - startTime, 'ms')
             console.log('Headers:', responseObj.headers)
