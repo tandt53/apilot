@@ -100,7 +100,7 @@ export async function updateEndpoint(
   console.warn('  request.body.description:', data.request?.body?.description)
   console.warn('  Full update data:', JSON.stringify(data, null, 2))
 
-  // @ts-ignore - Dexie has issues with circular references in CanonicalField type
+  // @ts-expect-error - Dexie has issues with circular references in CanonicalField type
   await db.endpoints.update(id, data)
 
   console.warn('✅ [API] Database update complete')
