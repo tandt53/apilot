@@ -91,12 +91,16 @@ export async function getEndpointsBySpec(specId: number): Promise<Endpoint[]> {
 /**
  * Update endpoint
  */
-export async function updateEndpoint(id: number, data: Partial<Omit<Endpoint, 'id' | 'specId' | 'createdAt'>>): Promise<void> {
+export async function updateEndpoint(
+  id: number,
+  data: any  // Using any to avoid Dexie circular reference issue with CanonicalField recursive types
+): Promise<void> {
   console.warn('🟢🟢🟢 [API] updateEndpoint() called 🟢🟢🟢')
   console.warn('  Endpoint ID:', id)
   console.warn('  request.body.description:', data.request?.body?.description)
   console.warn('  Full update data:', JSON.stringify(data, null, 2))
 
+  // @ts-expect-error - Dexie has issues with circular references in CanonicalField type
   await db.endpoints.update(id, data)
 
   console.warn('✅ [API] Database update complete')

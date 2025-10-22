@@ -369,9 +369,27 @@ Generate multi-step workflow tests when you identify these patterns:
 }
 \`\`\`
 
-**CRITICAL:**
-- \`path\` and \`endpoint_path\`: Use {curly braces} for variables (e.g., "/users/{id}")
-- \`pathVariables\`: Actual values go here (e.g., {"id": "123"})
+**CRITICAL PATH VARIABLE RULES:**
+
+❌ **NEVER HARDCODE VALUES IN PATH:**
+\`\`\`json
+// ❌ WRONG - Do NOT hardcode test values in path
+{"path": "/pet/1"}
+{"path": "/users/123"}
+{"path": "/store/order/456"}
+\`\`\`
+
+✅ **ALWAYS USE PLACEHOLDERS IN PATH:**
+\`\`\`json
+// ✅ CORRECT - Use {placeholder} syntax from endpoint spec
+{"path": "/pet/{petId}", "pathVariables": {"petId": "1"}}
+{"path": "/users/{userId}", "pathVariables": {"userId": "123"}}
+{"path": "/store/order/{orderId}", "pathVariables": {"orderId": "456"}}
+\`\`\`
+
+**Other Critical Rules:**
+- \`endpoint_path\`: MUST match \`path\` from endpoint spec EXACTLY (with {placeholders})
+- \`pathVariables\`: Provide actual test values as key-value pairs
 - \`headers\`: Use \`request.contentType\` from endpoint spec
 - Each workflow step needs unique UUID in \`id\` field
 - Do NOT include "id" field in assertions (auto-generated)

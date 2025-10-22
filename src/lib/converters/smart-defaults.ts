@@ -134,18 +134,25 @@ function enrichParameter(param: CanonicalParameter): CanonicalParameter {
 
 /**
  * Enrich a body field with smart defaults
+ *
+ * IMPORTANT: Preserve structural types (object, array) - don't override them!
+ * Fixed in BUG-012: Smart defaults were overriding correct object/array types to string.
  */
 function enrichField(field: CanonicalField): CanonicalField {
   const enriched = { ...field }
 
-  // Detect ID fields
-  if (isIdParameter(enriched.name)) {
+  // CRITICAL: Never override structural types (object, array)
+  // These types come from schema analysis and must be preserved
+  const isStructuralType = enriched.type === 'object' || enriched.type === 'array'
+
+  // Detect ID fields (only for primitive types)
+  if (!isStructuralType && isIdParameter(enriched.name)) {
     enriched.type = detectNumericType(enriched.example) || 'integer'
     enriched.required = false // IDs usually auto-generated
   }
 
-  // Detect email fields
-  if (enriched.name.toLowerCase().includes('email')) {
+  // Detect email fields (only for primitive types)
+  if (!isStructuralType && enriched.name.toLowerCase().includes('email')) {
     enriched.type = 'string'
     enriched.format = 'email'
     if (!enriched.description) {
@@ -153,8 +160,8 @@ function enrichField(field: CanonicalField): CanonicalField {
     }
   }
 
-  // Detect password fields
-  if (enriched.name.toLowerCase().includes('password')) {
+  // Detect password fields (only for primitive types)
+  if (!isStructuralType && enriched.name.toLowerCase().includes('password')) {
     enriched.type = 'string'
     enriched.format = 'password'
     enriched.min = 8
@@ -163,27 +170,38 @@ function enrichField(field: CanonicalField): CanonicalField {
     }
   }
 
-  // Detect URL fields
-  if (enriched.name.toLowerCase().includes('url') || enriched.name.toLowerCase().includes('link')) {
+  // Detect URL fields (only for primitive types)
+  // DON'T override array types like photoUrls!
+  if (!isStructuralType && (enriched.name.toLowerCase().includes('url') || enriched.name.toLowerCase().includes('link'))) {
     enriched.type = 'string'
     enriched.format = 'uri'
   }
 
-  // Detect date/time fields
-  if (isDateTimeField(enriched.name)) {
+  // Detect date/time fields (only for primitive types)
+  if (!isStructuralType && isDateTimeField(enriched.name)) {
     enriched.type = 'string'
     enriched.format = 'date-time'
   }
 
-  // Detect boolean fields
-  if (isBooleanField(enriched.name)) {
+  // Detect boolean fields (only for primitive types)
+  if (!isStructuralType && isBooleanField(enriched.name)) {
     enriched.type = 'boolean'
   }
 
-  // Enhance type from example
-  if (enriched.example !== undefined) {
+  // Recursively enrich nested properties (for object types)
+  if (enriched.type === 'object' && enriched.properties) {
+    enriched.properties = enriched.properties.map(enrichField)
+  }
+
+  // Recursively enrich array item properties (for array of objects)
+  if (enriched.type === 'array' && enriched.items?.properties) {
+    enriched.items.properties = enriched.items.properties.map(enrichField)
+  }
+
+  // Enhance format from example (but don't override type!)
+  if (enriched.example !== undefined && !enriched.format) {
     const detectedFormat = detectFormat(enriched.example, enriched.name)
-    if (detectedFormat && !enriched.format) {
+    if (detectedFormat) {
       enriched.format = detectedFormat
     }
   }

@@ -51,11 +51,10 @@ export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorPro
         <div className="space-y-2">
           {/* Header */}
           <div className="grid grid-cols-12 gap-3 px-3 pb-2 border-b border-gray-300">
-            <div className="col-span-3 text-xs font-semibold text-gray-600 uppercase">Name</div>
+            <div className="col-span-4 text-xs font-semibold text-gray-600 uppercase">Name</div>
             <div className="col-span-2 text-xs font-semibold text-gray-600 uppercase">Type</div>
             <div className="col-span-1 text-xs font-semibold text-gray-600 uppercase text-center">Required</div>
-            <div className="col-span-3 text-xs font-semibold text-gray-600 uppercase">Example</div>
-            <div className="col-span-2 text-xs font-semibold text-gray-600 uppercase">Description</div>
+            <div className="col-span-4 text-xs font-semibold text-gray-600 uppercase">Description</div>
             <div className="col-span-1"></div>
           </div>
 
@@ -66,7 +65,7 @@ export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorPro
               className="grid grid-cols-12 gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50"
             >
               {/* Name */}
-              <div className="col-span-3">
+              <div className="col-span-4">
                 <input
                   type="text"
                   value={field.name}
@@ -106,29 +105,8 @@ export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorPro
                 </label>
               </div>
 
-              {/* Example */}
-              <div className="col-span-3">
-                <input
-                  type="text"
-                  value={field.example !== undefined ? String(field.example) : ''}
-                  onChange={(e) => {
-                    // Try to parse as appropriate type
-                    let value: any = e.target.value
-                    if (field.type === 'integer' || field.type === 'number') {
-                      const num = Number(value)
-                      value = isNaN(num) ? value : num
-                    } else if (field.type === 'boolean') {
-                      value = value === 'true'
-                    }
-                    handleUpdate(index, 'example', value)
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  placeholder="Example value"
-                />
-              </div>
-
               {/* Description */}
-              <div className="col-span-2">
+              <div className="col-span-4">
                 <input
                   type="text"
                   value={field.description || ''}

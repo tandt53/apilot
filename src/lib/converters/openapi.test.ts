@@ -455,6 +455,260 @@ describe('convertOpenAPIToCanonical', () => {
     })
   })
 
+  describe('Swagger 2.0 Bug Fixes (Regression Tests)', () => {
+    // BUG-001: Integer parameters should preserve type and format
+    it('should preserve integer type for path parameters (BUG-001)', () => {
+      const operation = {
+        summary: 'Get pet by ID',
+        parameters: [
+          {
+            name: 'petId',
+            in: 'path',
+            type: 'integer',
+            format: 'int64',
+            required: true,
+            description: 'ID of pet to return',
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet/{petId}', 'get', spec)
+
+      expect(endpoint.request.parameters).toBeDefined()
+      expect(endpoint.request.parameters).toHaveLength(1)
+      expect(endpoint.request.parameters![0].type).toBe('integer')
+      expect(endpoint.request.parameters![0].format).toBe('int64')
+      expect(endpoint.request.parameters![0].name).toBe('petId')
+    })
+
+    // BUG-003: Array parameters should preserve type and items
+    it('should preserve array type for query parameters (BUG-003)', () => {
+      const operation = {
+        summary: 'Find pets by status',
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['available', 'pending', 'sold'],
+              default: 'available',
+            },
+            required: true,
+            description: 'Status values',
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet/findByStatus', 'get', spec)
+
+      expect(endpoint.request.parameters).toBeDefined()
+      expect(endpoint.request.parameters).toHaveLength(1)
+      expect(endpoint.request.parameters![0].type).toBe('array')
+      expect(endpoint.request.parameters![0].items).toBeDefined()
+      expect(endpoint.request.parameters![0].items!.type).toBe('string')
+    })
+
+    // BUG-004: Enum values should be preserved
+    it('should preserve enum values in array items (BUG-004)', () => {
+      const operation = {
+        summary: 'Find pets by status',
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['available', 'pending', 'sold'],
+            },
+            required: true,
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet/findByStatus', 'get', spec)
+
+      expect(endpoint.request.parameters![0].items!.enum).toEqual(['available', 'pending', 'sold'])
+    })
+
+    // BUG-005: Default values should be preserved
+    it('should preserve default values in array items (BUG-005)', () => {
+      const operation = {
+        summary: 'Find pets by status',
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            type: 'array',
+            items: {
+              type: 'string',
+              default: 'available',
+            },
+            required: false,
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet/findByStatus', 'get', spec)
+
+      expect(endpoint.request.parameters![0].items!.default).toBe('available')
+    })
+
+    // BUG-002: Object $ref should be resolved to object type
+    it('should resolve $ref to object type in request body (BUG-002)', () => {
+      const operation = {
+        summary: 'Create pet',
+        parameters: [
+          {
+            in: 'body',
+            name: 'body',
+            required: true,
+            schema: {
+              $ref: '#/definitions/Pet',
+            },
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+        definitions: {
+          Pet: {
+            type: 'object',
+            required: ['name', 'photoUrls'],
+            properties: {
+              id: {
+                type: 'integer',
+                format: 'int64',
+              },
+              category: {
+                $ref: '#/definitions/Category',
+              },
+              name: {
+                type: 'string',
+                example: 'doggie',
+              },
+              photoUrls: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                },
+              },
+            },
+          },
+          Category: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'integer',
+                format: 'int64',
+              },
+              name: {
+                type: 'string',
+              },
+            },
+          },
+        },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet', 'post', spec)
+
+      expect(endpoint.request.body).toBeDefined()
+      expect(endpoint.request.body!.fields).toBeDefined()
+
+      // Find the category field
+      const categoryField = endpoint.request.body!.fields.find(f => f.name === 'category')
+      expect(categoryField).toBeDefined()
+      expect(categoryField!.type).toBe('object') // Should be 'object', not 'string'
+      expect(categoryField!.properties).toBeDefined()
+      expect(categoryField!.properties).toHaveLength(2)
+
+      // Verify nested properties
+      expect(categoryField!.properties![0].name).toBe('id')
+      expect(categoryField!.properties![0].type).toBe('integer')
+      expect(categoryField!.properties![1].name).toBe('name')
+      expect(categoryField!.properties![1].type).toBe('string')
+    })
+
+    // Combined test: All bugs in one realistic Swagger 2.0 endpoint
+    it('should handle complex Swagger 2.0 endpoint with all bug fixes', () => {
+      const operation = {
+        summary: 'Search pets',
+        parameters: [
+          {
+            name: 'petId',
+            in: 'path',
+            type: 'integer',
+            format: 'int64',
+            required: true,
+          },
+          {
+            name: 'status',
+            in: 'query',
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['available', 'pending', 'sold'],
+              default: 'available',
+            },
+            required: false,
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      }
+
+      const spec = {
+        swagger: '2.0',
+        info: { title: 'Test', version: '1.0.0' },
+      }
+
+      const endpoint = convertOpenAPIToCanonical(operation, '/pet/{petId}/search', 'get', spec)
+
+      // Verify integer parameter (BUG-001)
+      const petIdParam = endpoint.request.parameters!.find(p => p.name === 'petId')
+      expect(petIdParam!.type).toBe('integer')
+      expect(petIdParam!.format).toBe('int64')
+
+      // Verify array parameter (BUG-003)
+      const statusParam = endpoint.request.parameters!.find(p => p.name === 'status')
+      expect(statusParam!.type).toBe('array')
+
+      // Verify enum (BUG-004)
+      expect(statusParam!.items!.enum).toEqual(['available', 'pending', 'sold'])
+
+      // Verify default (BUG-005)
+      expect(statusParam!.items!.default).toBe('available')
+    })
+  })
+
   describe('Edge Cases', () => {
     it('should handle minimal operation', () => {
       const operation = {

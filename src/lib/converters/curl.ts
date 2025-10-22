@@ -111,10 +111,11 @@ function parseCurlCommand(command: string): ParsedCurl {
 
   // Extract headers (-H or --header, with or without quotes)
   // Handles: -H "header: value", -H'header: value', -Hheader:value, --header "header: value"
-  const headerRegex = /(?:-H|--header)(?:=|\s+)?(?:['"]([^'"]+)['"]|([^\s]+))/g
+  // IMPORTANT: Use separate patterns for single vs double quotes to allow internal quotes
+  const headerRegex = /(?:-H|--header)(?:=|\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/g
   let headerMatch
   while ((headerMatch = headerRegex.exec(normalized)) !== null) {
-    const headerValue = headerMatch[1] || headerMatch[2]
+    const headerValue = headerMatch[1] || headerMatch[2] || headerMatch[3]
     const [name, ...valueParts] = headerValue.split(':')
     const value = valueParts.join(':').trim()
     result.headers.push({ name: name.trim(), value })
@@ -122,11 +123,12 @@ function parseCurlCommand(command: string): ParsedCurl {
 
   // Extract multipart form data (-F or --form)
   // Handles: -F "field=value", -F "file=@path/to/file"
-  const formRegex = /(?:-F|--form)\s+(?:['"]([^'"]+)['"]|([^\s]+))/g
+  // IMPORTANT: Use separate patterns for single vs double quotes to allow internal quotes
+  const formRegex = /(?:-F|--form)\s+(?:'([^']*)'|"([^"]*)"|(\S+))/g
   let formMatch
   const formFields: Array<{ name: string; value: string }> = []
   while ((formMatch = formRegex.exec(normalized)) !== null) {
-    const formValue = formMatch[1] || formMatch[2]
+    const formValue = formMatch[1] || formMatch[2] || formMatch[3]
     const [name, ...valueParts] = formValue.split('=')
     const value = valueParts.join('=')
     formFields.push({ name: name.trim(), value })
@@ -135,23 +137,19 @@ function parseCurlCommand(command: string): ParsedCurl {
   // If form fields exist, set Content-Type and body
   if (formFields.length > 0) {
     result.contentType = 'multipart/form-data'
-    // Convert form fields to object for body
-    result.body = formFields.map(f => {
-      // Handle file uploads (@filename)
-      if (f.value.startsWith('@')) {
-        return `${f.name}=${f.value.substring(1)}`
-      }
-      return `${f.name}=${f.value}`
-    }).join('\n')
+    // Convert form fields to encoded string (preserve @ prefix for file detection)
+    result.body = formFields.map(f => `${f.name}=${f.value}`).join('\n')
   }
 
   // Extract body (-d, --data, --data-raw, --data-binary)
   // Collect ALL data flags and concatenate them
-  const dataRegex = /(?:-d|--data|--data-raw|--data-binary)(?:=|\s+)?(?:['"]([^'"]+?)['"]|([^\s]+))/g
+  // IMPORTANT: Use separate patterns for single vs double quotes to allow internal quotes
+  // Example: -d '{"key": "value"}' should capture the full JSON, not stop at internal "
+  const dataRegex = /(?:-d|--data|--data-raw|--data-binary)(?:=|\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/g
   let dataMatch
   const dataParts: string[] = []
   while ((dataMatch = dataRegex.exec(normalized)) !== null) {
-    const dataValue = dataMatch[1] || dataMatch[2]
+    const dataValue = dataMatch[1] || dataMatch[2] || dataMatch[3]
     dataParts.push(dataValue)
   }
 
@@ -239,7 +237,7 @@ function extractQueryParameters(url: URL): CanonicalParameter[] {
  * Convert header to canonical parameter
  */
 function convertHeaderToParameter(header: { name: string; value: string }): CanonicalParameter {
-  // Skip Content-Type header (handled separately)
+  // Content-Type header
   if (header.name.toLowerCase() === 'content-type') {
     return {
       name: header.name,
@@ -247,6 +245,7 @@ function convertHeaderToParameter(header: { name: string; value: string }): Cano
       type: 'string',
       required: false,
       example: header.value,
+      description: 'Request content type',
     }
   }
 
@@ -279,20 +278,52 @@ function convertBodyToCanonical(body: string, contentType?: string): CanonicalRe
         name: 'body',
         type: 'string',
         required: true,
-        example: body,
+        // NOTE: Removed field.example - not needed, only body.example is used
       }]
     }
   }
-  // Form data
+  // Form data (application/x-www-form-urlencoded)
   else if (contentType?.includes('form-urlencoded')) {
     const params = new URLSearchParams(body)
-    parsedBody = Object.fromEntries(params)
+    // Keep body as URL-encoded string format, not JSON object
+    parsedBody = body
     fields = Array.from(params.entries()).map(([name, value]) => ({
       name,
       type: inferType(value),
       required: true,
-      example: parseValue(value),
+      // NOTE: Removed field.example - not needed, only body.example is used
     }))
+  }
+  // Multipart form data (multipart/form-data)
+  else if (contentType?.includes('multipart/form-data')) {
+    const lines = body.split('\n')
+    parsedBody = {}
+    fields = []
+
+    for (const line of lines) {
+      if (!line.trim()) continue  // Skip empty lines
+
+      const separatorIndex = line.indexOf('=')
+      if (separatorIndex === -1) continue  // Skip malformed lines
+
+      const name = line.substring(0, separatorIndex).trim()
+      const value = line.substring(separatorIndex + 1)
+
+      // Detect file uploads from @ prefix
+      const isFile = value.startsWith('@')
+      const actualValue = isFile ? value.substring(1) : value
+
+      parsedBody[name] = actualValue
+
+      fields.push({
+        name,
+        type: isFile ? 'file' : inferType(actualValue),
+        format: isFile ? 'binary' : undefined,
+        required: true,
+        // NOTE: Removed field.example - not needed, only body.example is used
+        description: isFile ? `File upload: ${actualValue}` : undefined,
+      })
+    }
   }
   // Raw text
   else {
@@ -301,7 +332,7 @@ function convertBodyToCanonical(body: string, contentType?: string): CanonicalRe
       name: 'body',
       type: 'string',
       required: true,
-      example: body,
+      // NOTE: Removed field.example - not needed, only body.example is used
     }]
   }
 
@@ -315,8 +346,11 @@ function convertBodyToCanonical(body: string, contentType?: string): CanonicalRe
 
 /**
  * Extract fields from JSON object
+ *
+ * IMPORTANT: Matches canonical format structure used by OpenAPI converter.
+ * Nested objects are preserved with `properties` array, not flattened with dots.
  */
-function extractFieldsFromObject(obj: any, prefix = ''): any[] {
+function extractFieldsFromObject(obj: any): any[] {
   const fields: any[] = []
 
   if (typeof obj !== 'object' || obj === null) {
@@ -324,19 +358,31 @@ function extractFieldsFromObject(obj: any, prefix = ''): any[] {
   }
 
   for (const [key, value] of Object.entries(obj)) {
-    const fieldName = prefix ? `${prefix}.${key}` : key
-
-    fields.push({
-      name: fieldName,
+    const field: any = {
+      name: key,
       type: inferType(value),
       required: true, // Assume required if present in example
-      example: value,
-    })
-
-    // Recursively extract nested fields
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      fields.push(...extractFieldsFromObject(value, fieldName))
+      // NOTE: Removed field.example - not needed, only body.example is used
     }
+
+    // Handle nested objects - create properties array (NOT flattened with dots)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      field.properties = extractFieldsFromObject(value)
+    }
+
+    // Handle arrays - set items type
+    if (Array.isArray(value) && value.length > 0) {
+      field.items = {
+        type: inferType(value[0]),
+        // NOTE: Removed field.items.example - not needed, only body.example is used
+      }
+      // If array contains objects, recursively extract properties
+      if (typeof value[0] === 'object' && value[0] !== null && !Array.isArray(value[0])) {
+        field.items.properties = extractFieldsFromObject(value[0])
+      }
+    }
+
+    fields.push(field)
   }
 
   return fields

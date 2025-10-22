@@ -7,6 +7,7 @@ import AssertionsSection from './AssertionsSection'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
 import {substituteBuiltInVariables} from '@/utils/variables'
+import {buildBodyFromSchema, bodyMatchesSchema} from '@/lib/utils/bodyHelpers'
 
 interface Assertion {
     type: string
@@ -156,25 +157,99 @@ export default function RequestTester({
         if (endpoint.request?.body) {
             const contentType = endpoint.request.contentType
 
+            // Skip body for form data types (handled by formData state)
             if (contentType?.includes('multipart/form-data') || contentType?.includes('application/x-www-form-urlencoded')) {
                 return ''
             }
 
-            if (endpoint.request.body.example) {
-                return JSON.stringify(endpoint.request.body.example, null, 2)
+            const example = endpoint.request.body.example
+            const fields = endpoint.request.body.fields || []
+
+            // SMART FALLBACK: Check if example matches schema
+            // If mismatch detected, build from schema with defaults
+            if (example && fields.length > 0 && contentType === 'application/json') {
+                const exampleMatches = bodyMatchesSchema(example, fields)
+
+                if (!exampleMatches) {
+                    // Mismatch detected! Build from schema with defaults
+                    console.warn('[RequestTester] Schema/example mismatch detected, using schema defaults')
+                    const defaultBody = buildBodyFromSchema(fields)
+                    return JSON.stringify(defaultBody, null, 2)
+                }
             }
 
-            if (endpoint.request.body.fields && endpoint.request.body.fields.length > 0) {
-                const obj: any = {}
-                endpoint.request.body.fields.forEach((field: any) => {
-                    obj[field.name] = field.example !== undefined ? field.example : null
-                })
-                return JSON.stringify(obj, null, 2)
+            // Use example if it exists and matches (or no schema to compare)
+            if (example) {
+                return JSON.stringify(example, null, 2)
+            }
+
+            // Build from schema if no example exists
+            if (fields.length > 0) {
+                const defaultBody = buildBodyFromSchema(fields)
+                return JSON.stringify(defaultBody, null, 2)
             }
         }
 
         return ''
     })
+
+    // Watch for endpoint changes and re-apply smart fallback logic
+    useEffect(() => {
+        if (endpoint.request?.body) {
+            const contentType = endpoint.request.contentType
+
+            // Skip body for form data types
+            if (contentType?.includes('multipart/form-data') || contentType?.includes('application/x-www-form-urlencoded')) {
+                return
+            }
+
+            const example = endpoint.request.body.example
+            const fields = endpoint.request.body.fields || []
+
+            // Check if saved session body matches current schema
+            if (initialSession?.lastRequest?.body) {
+                try {
+                    const savedBody = JSON.parse(initialSession.lastRequest.body)
+                    const sessionMatches = bodyMatchesSchema(savedBody, fields)
+
+                    if (sessionMatches) {
+                        // Saved body matches schema, keep it (preserve user's manual edits)
+                        return
+                    }
+                    // Saved body doesn't match schema, continue to rebuild
+                    console.warn('[RequestTester] Session body doesn\'t match schema, rebuilding from schema defaults')
+                } catch (e) {
+                    // Invalid JSON in session, continue to rebuild
+                    console.warn('[RequestTester] Invalid JSON in session, rebuilding from schema defaults')
+                }
+            }
+
+            // SMART FALLBACK: Check if example matches schema
+            if (example && fields.length > 0 && contentType === 'application/json') {
+                const exampleMatches = bodyMatchesSchema(example, fields)
+
+                if (!exampleMatches) {
+                    // Mismatch detected! Build from schema with defaults
+                    console.warn('[RequestTester] Schema/example mismatch detected (useEffect), using schema defaults')
+                    const defaultBody = buildBodyFromSchema(fields)
+                    setBody(JSON.stringify(defaultBody, null, 2))
+                    return
+                }
+            }
+
+            // Use example if it exists and matches
+            if (example) {
+                setBody(JSON.stringify(example, null, 2))
+                return
+            }
+
+            // Build from schema if no example exists
+            if (fields.length > 0) {
+                const defaultBody = buildBodyFromSchema(fields)
+                setBody(JSON.stringify(defaultBody, null, 2))
+            }
+        }
+    }, [endpoint.request?.body, endpoint.id, initialSession?.lastRequest?.body])
 
     const [formData, setFormData] = useState<Record<string, any>>(() => {
         // Try to load from session first
@@ -337,14 +412,26 @@ export default function RequestTester({
         } else if (endpoint.request?.body) {
             const contentType = endpoint.request.contentType
             if (!(contentType?.includes('multipart/form-data') || contentType?.includes('application/x-www-form-urlencoded'))) {
-                if (endpoint.request.body.example) {
-                    initialBody = JSON.stringify(endpoint.request.body.example, null, 2)
-                } else if (endpoint.request.body.fields && endpoint.request.body.fields.length > 0) {
-                    const obj: any = {}
-                    endpoint.request.body.fields.forEach((field: any) => {
-                        obj[field.name] = field.example !== undefined ? field.example : null
-                    })
-                    initialBody = JSON.stringify(obj, null, 2)
+                const example = endpoint.request.body.example
+                const fields = endpoint.request.body.fields || []
+
+                // SMART FALLBACK: Check if example matches schema
+                if (example && fields.length > 0 && contentType === 'application/json') {
+                    const exampleMatches = bodyMatchesSchema(example, fields)
+
+                    if (!exampleMatches) {
+                        // Mismatch detected! Build from schema with defaults
+                        console.warn('[RequestTester] Schema/example mismatch detected in reset, using schema defaults')
+                        const defaultBody = buildBodyFromSchema(fields)
+                        initialBody = JSON.stringify(defaultBody, null, 2)
+                    } else if (example) {
+                        initialBody = JSON.stringify(example, null, 2)
+                    }
+                } else if (example) {
+                    initialBody = JSON.stringify(example, null, 2)
+                } else if (fields.length > 0) {
+                    const defaultBody = buildBodyFromSchema(fields)
+                    initialBody = JSON.stringify(defaultBody, null, 2)
                 }
             }
         }

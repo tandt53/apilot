@@ -128,31 +128,56 @@ function convertParameters(
 
     if (!resolvedParam) continue
 
+    // IMPORTANT: Handle both Swagger 2.0 and OpenAPI 3.x formats
+    // - Swagger 2.0: properties directly on parameter (type, format, etc.)
+    // - OpenAPI 3.x: properties in parameter.schema
     const schema = resolvedParam.schema || {}
+
+    // For Swagger 2.0, use parameter properties directly; for OpenAPI 3.x, use schema properties
+    const type = schema.type || resolvedParam.type || 'string'
+    const format = schema.format || resolvedParam.format
+    const enumValues = schema.enum || resolvedParam.enum
+    const pattern = schema.pattern || resolvedParam.pattern
+    const minimum = schema.minimum || resolvedParam.minimum
+    const maximum = schema.maximum || resolvedParam.maximum
+    const minLength = schema.minLength || resolvedParam.minLength
+    const maxLength = schema.maxLength || resolvedParam.maxLength
+    const defaultValue = schema.default !== undefined ? schema.default : resolvedParam.default
+    const items = schema.items || resolvedParam.items
 
     const canonicalParam: CanonicalParameter = {
       name: resolvedParam.name,
       in: resolvedParam.in,
-      type: schema.type || 'string',
+      type: type,
       required: resolvedParam.required || false,
       description: resolvedParam.description,
       example:
         resolvedParam.example ||
         extractExample(schema) ||
-        schemaToExample(schema, resolvedParam.name),
-      enum: schema.enum,
-      pattern: schema.pattern,
-      min: schema.minimum || schema.minLength,
-      max: schema.maximum || schema.maxLength,
-      default: schema.default,
-      format: schema.format,
+        schemaToExample({ type, format, enum: enumValues, default: defaultValue }, resolvedParam.name),
+      enum: enumValues,
+      pattern: pattern,
+      min: minimum || minLength,
+      max: maximum || maxLength,
+      default: defaultValue,
+      format: format,
     }
 
     // Handle array type
-    if (schema.type === 'array' && schema.items) {
+    if (type === 'array' && items) {
       canonicalParam.items = {
-        type: schema.items.type || 'string',
-        example: schemaToExample(schema.items),
+        type: items.type || 'string',
+        example: schemaToExample(items),
+      }
+
+      // Preserve enum from array items (Swagger 2.0 specific)
+      if (items.enum) {
+        canonicalParam.items.enum = items.enum
+      }
+
+      // Preserve default from array items (Swagger 2.0 specific)
+      if (items.default !== undefined) {
+        canonicalParam.items.default = items.default
       }
     }
 
@@ -203,9 +228,9 @@ function convertRequestBody(
     example = schemaToExample(schema)
   }
 
-  // Generate fields from schema
+  // Generate fields from schema (pass spec for $ref resolution)
   const fields = schema
-    ? flattenSchemaToFields(schema, schema.required || [])
+    ? flattenSchemaToFields(schema, schema.required || [], spec)
     : []
 
   // Merge example values into fields
@@ -285,9 +310,9 @@ function extractSuccessResponse(responses: any, spec: any): any {
         extractExample(content) ||
         (schema ? schemaToExample(schema) : undefined)
 
-      // Generate fields
+      // Generate fields (pass spec for $ref resolution)
       const fields = schema
-        ? flattenSchemaToFields(schema, schema.required || []).map(f => ({
+        ? flattenSchemaToFields(schema, schema.required || [], spec).map(f => ({
             name: f.name,
             type: f.type,
             description: f.description,

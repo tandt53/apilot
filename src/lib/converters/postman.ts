@@ -486,9 +486,15 @@ function convertFormDataBody(items: Array<{ key: string; value: string; type?: s
 }
 
 /**
- * Extract fields from object (for JSON bodies)
+ * Extract fields from JSON object
+ *
+ * IMPORTANT: Matches canonical format structure used by OpenAPI converter.
+ * Nested objects are preserved with `properties` array, not flattened with dots.
+ *
+ * Fixed in BUG-012: Previously flattened nested objects with dot notation (e.g., category.id)
+ * Now creates proper nested structure with `properties` arrays.
  */
-function extractFieldsFromObject(obj: any, prefix = ''): any[] {
+function extractFieldsFromObject(obj: any): any[] {
   const fields: any[] = []
 
   if (typeof obj !== 'object' || obj === null) {
@@ -496,19 +502,31 @@ function extractFieldsFromObject(obj: any, prefix = ''): any[] {
   }
 
   for (const [key, value] of Object.entries(obj)) {
-    const fieldName = prefix ? `${prefix}.${key}` : key
-
-    fields.push({
-      name: fieldName,
+    const field: any = {
+      name: key,
       type: inferType(value),
-      required: true,
-      example: value,
-    })
-
-    // Handle nested objects
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      fields.push(...extractFieldsFromObject(value, fieldName))
+      required: true, // Assume required if present in example
+      // NOTE: Removed field.example - not needed, only body.example is used
     }
+
+    // Handle nested objects - create properties array (NOT flattened with dots)
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      field.properties = extractFieldsFromObject(value)
+    }
+
+    // Handle arrays - set items type
+    if (Array.isArray(value) && value.length > 0) {
+      field.items = {
+        type: inferType(value[0]),
+        // NOTE: Removed field.items.example - not needed, only body.example is used
+      }
+      // If array contains objects, recursively extract properties
+      if (typeof value[0] === 'object' && value[0] !== null && !Array.isArray(value[0])) {
+        field.items.properties = extractFieldsFromObject(value[0])
+      }
+    }
+
+    fields.push(field)
   }
 
   return fields
