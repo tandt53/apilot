@@ -167,10 +167,13 @@ function generateObjectExample(schema: any): any {
 
 /**
  * Flatten a JSON Schema to a canonical fields array
+ *
+ * Note: Pass spec as third parameter to enable $ref resolution for Swagger 2.0
  */
 export function flattenSchemaToFields(
   schema: any,
-  requiredFields: string[] = []
+  requiredFields: string[] = [],
+  spec?: any
 ): CanonicalField[] {
   if (!schema || !schema.properties) {
     return []
@@ -179,7 +182,16 @@ export function flattenSchemaToFields(
   const fields: CanonicalField[] = []
 
   for (const [propName, propSchema] of Object.entries(schema.properties)) {
-    const prop = propSchema as any
+    let prop = propSchema as any
+
+    // IMPORTANT: Resolve $ref if present (for Swagger 2.0 nested object references)
+    if (prop.$ref && spec) {
+      const resolved = resolveSchemaRef(prop.$ref, spec)
+      if (resolved) {
+        prop = resolved
+      }
+    }
+
     const field: CanonicalField = {
       name: propName,
       type: prop.type || 'string',
@@ -194,19 +206,33 @@ export function flattenSchemaToFields(
 
     // Handle array items
     if (prop.type === 'array' && prop.items) {
+      // Resolve $ref in array items if present
+      let items = prop.items
+      if (items.$ref && spec) {
+        const resolved = resolveSchemaRef(items.$ref, spec)
+        if (resolved) {
+          items = resolved
+        }
+      }
+
       field.items = {
-        type: prop.items.type || 'string',
-        example: schemaToExample(prop.items),
+        type: items.type || 'string',
+        // NOTE: Removed field.items.example - not needed, only body.example is used
+      }
+
+      // Preserve enum from items
+      if (items.enum) {
+        field.items.enum = items.enum
       }
     }
 
     // Handle nested objects
     if (prop.type === 'object' && prop.properties) {
-      field.properties = flattenSchemaToFields(prop, prop.required || [])
+      field.properties = flattenSchemaToFields(prop, prop.required || [], spec)
     }
 
-    // Generate example for this field
-    field.example = schemaToExample(prop, propName)
+    // NOTE: Removed field.example - not needed, only body.example is used
+    // field.example = schemaToExample(prop, propName)
 
     fields.push(field)
   }
@@ -252,14 +278,14 @@ export function inferFieldsFromExample(example: any): CanonicalField[] {
       name: key,
       type: inferTypeFromExample(value),
       required: false, // Can't determine from example alone
-      example: value,
+      // NOTE: Removed field.example - not needed, only body.example is used
     }
 
     // Handle nested arrays
     if (Array.isArray(value) && value.length > 0) {
       field.items = {
         type: inferTypeFromExample(value[0]),
-        example: value[0],
+        // NOTE: Removed field.items.example - not needed, only body.example is used
       }
     }
 

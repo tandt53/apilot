@@ -185,6 +185,29 @@ describe('convertCurlToCanonical', () => {
 
       expect(endpoint.request?.contentType).toBe('multipart/form-data')
       expect(endpoint.request?.body).toBeDefined()
+
+      // Verify individual fields parsed correctly
+      expect(endpoint.request?.body?.fields).toHaveLength(2)
+
+      // Verify file field
+      const fileField = endpoint.request?.body?.fields.find((f: any) => f.name === 'file')
+      expect(fileField).toBeDefined()
+      expect(fileField?.type).toBe('file')
+      expect(fileField?.format).toBe('binary')
+      // NOTE: field.example removed, only body.example is used
+
+      // Verify string field
+      const nameField = endpoint.request?.body?.fields.find((f: any) => f.name === 'name')
+      expect(nameField).toBeDefined()
+      expect(nameField?.type).toBe('string')
+      // NOTE: field.example removed, only body.example is used
+
+      // Verify example object
+      expect(typeof endpoint.request?.body?.example).toBe('object')
+      expect(endpoint.request?.body?.example).toEqual({
+        file: 'photo.jpg',
+        name: 'John'
+      })
     })
 
     it('should default to POST when --data is present without -X', () => {
@@ -236,6 +259,141 @@ describe('convertCurlToCanonical', () => {
       // Just verify the endpoint was parsed successfully with some headers
       expect(endpoint.request?.parameters).toBeDefined()
       expect(endpoint.request?.parameters!.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('Regression Tests (Bug Fixes)', () => {
+    it('should parse complex nested JSON with internal quotes (BUG-006)', () => {
+      // Bug: Regex pattern stopped at first internal quote, capturing only "{ " instead of full JSON
+      // Fix: Use separate patterns for single vs double quotes
+      const curl = `curl -X POST https://api.shop.com/orders \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer shop_token_xyz" \\
+  -d '{
+    "customerId": 12345,
+    "items": [
+      {"productId": 101, "quantity": 2, "price": 29.99},
+      {"productId": 205, "quantity": 1, "price": 49.99}
+    ],
+    "shippingAddress": {
+      "street": "123 Main St",
+      "city": "San Francisco",
+      "state": "CA",
+      "zip": "94102"
+    },
+    "paymentMethod": "credit_card"
+  }'`
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      // Verify method and path
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.path).toBe('/orders')
+
+      // Verify body was parsed completely (not just "{ ")
+      expect(endpoint.request?.body).toBeDefined()
+      expect(endpoint.request?.body?.example).toBeDefined()
+
+      // Verify it's a proper object, not a truncated string
+      expect(typeof endpoint.request?.body?.example).toBe('object')
+      expect(endpoint.request?.body?.example).toHaveProperty('customerId', 12345)
+      expect(endpoint.request?.body?.example).toHaveProperty('items')
+      expect(endpoint.request?.body?.example).toHaveProperty('shippingAddress')
+      expect(endpoint.request?.body?.example).toHaveProperty('paymentMethod', 'credit_card')
+
+      // Verify nested array
+      expect(Array.isArray(endpoint.request?.body?.example.items)).toBe(true)
+      expect(endpoint.request?.body?.example.items).toHaveLength(2)
+      expect(endpoint.request?.body?.example.items[0]).toHaveProperty('productId', 101)
+
+      // Verify nested object
+      expect(typeof endpoint.request?.body?.example.shippingAddress).toBe('object')
+      expect(endpoint.request?.body?.example.shippingAddress).toHaveProperty('city', 'San Francisco')
+
+      // Verify fields were extracted (should have structured fields, not just "body: string")
+      expect(endpoint.request?.body?.fields).toBeDefined()
+      expect(endpoint.request?.body?.fields.length).toBe(4) // Should have 4 top-level fields
+
+      // Check for specific top-level fields (no flattened dotted names!)
+      const fieldNames = endpoint.request?.body?.fields.map((f: any) => f.name)
+      expect(fieldNames).toContain('customerId')
+      expect(fieldNames).toContain('items')
+      expect(fieldNames).toContain('shippingAddress')
+      expect(fieldNames).toContain('paymentMethod')
+
+      // Verify NO flattened fields with dots (BUG-007)
+      expect(fieldNames).not.toContain('shippingAddress.street')
+      expect(fieldNames).not.toContain('shippingAddress.city')
+
+      // Verify shippingAddress has nested properties array (not flattened)
+      const shippingField = endpoint.request?.body?.fields.find((f: any) => f.name === 'shippingAddress')
+      expect(shippingField).toBeDefined()
+      expect(shippingField?.type).toBe('object')
+      expect(shippingField?.properties).toBeDefined()
+      expect(Array.isArray(shippingField?.properties)).toBe(true)
+      expect(shippingField?.properties.length).toBe(4) // street, city, state, zip
+
+      // Verify nested property names
+      const nestedNames = shippingField?.properties.map((p: any) => p.name)
+      expect(nestedNames).toContain('street')
+      expect(nestedNames).toContain('city')
+      expect(nestedNames).toContain('state')
+      expect(nestedNames).toContain('zip')
+
+      // Verify items array has properties for nested objects
+      const itemsField = endpoint.request?.body?.fields.find((f: any) => f.name === 'items')
+      expect(itemsField).toBeDefined()
+      expect(itemsField?.type).toBe('array')
+      expect(itemsField?.items).toBeDefined()
+      expect(itemsField?.items.type).toBe('object')
+      expect(itemsField?.items.properties).toBeDefined()
+      expect(itemsField?.items.properties.length).toBe(3) // productId, quantity, price
+    })
+
+    it('should parse multipart form data with file uploads (BUG-008)', () => {
+      // Bug: Multipart form data was treated as raw text with single 'body' field
+      // Fix: Parse individual fields and detect file uploads from @ prefix
+      const curl = `curl -X POST https://api.example.com/upload \\
+  -H "Authorization: Bearer token123" \\
+  -F "file=@photo.jpg" \\
+  -F "description=Profile Photo"`
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      // Verify method and path
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.path).toBe('/upload')
+
+      // Verify content type
+      expect(endpoint.request?.contentType).toBe('multipart/form-data')
+
+      // Verify 2 separate fields (not 1 'body' field)
+      expect(endpoint.request?.body?.fields).toHaveLength(2)
+
+      // Verify file field with proper type
+      const fileField = endpoint.request?.body?.fields.find((f: any) => f.name === 'file')
+      expect(fileField).toBeDefined()
+      expect(fileField?.type).toBe('file')
+      expect(fileField?.format).toBe('binary')
+      // NOTE: field.example removed, only body.example is used
+      expect(fileField?.description).toContain('File upload')
+
+      // Verify string field
+      const descField = endpoint.request?.body?.fields.find((f: any) => f.name === 'description')
+      expect(descField).toBeDefined()
+      expect(descField?.type).toBe('string')
+      // NOTE: field.example removed, only body.example is used
+
+      // Verify example is object (not string)
+      expect(typeof endpoint.request?.body?.example).toBe('object')
+      expect(endpoint.request?.body?.example).toEqual({
+        file: 'photo.jpg',
+        description: 'Profile Photo'
+      })
+
+      // Verify NOT a single 'body' field
+      const bodyField = endpoint.request?.body?.fields.find((f: any) => f.name === 'body')
+      expect(bodyField).toBeUndefined()
     })
   })
 })

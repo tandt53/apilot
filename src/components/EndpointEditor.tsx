@@ -1,9 +1,10 @@
 import {useEffect, useState} from 'react'
-import {Save, X} from 'lucide-react'
+import {Save, X, AlertTriangle} from 'lucide-react'
 import type {Endpoint} from '@/types/database'
 import {updateEndpoint} from '@/lib/api/endpoints'
 import ParametersEditor from './ParametersEditor'
 import BodyFieldsEditor from './BodyFieldsEditor'
+import {validateBodyConsistency} from '@/lib/utils/bodyHelpers'
 
 interface EndpointEditorProps {
   endpoint: Endpoint
@@ -51,6 +52,11 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [bodyValidation, setBodyValidation] = useState<{
+    isValid: boolean
+    missing: string[]
+    extra: string[]
+  } | null>(null)
 
   // Separate parameters by type
   const queryParams = parameters.filter(p => p.in === 'query')
@@ -72,6 +78,24 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
 
     setHasUnsavedChanges(changed)
   }, [name, description, contentType, bodyDescription, bodyExample, parameters, bodyFields, endpoint])
+
+  // Validate body example against schema whenever they change
+  useEffect(() => {
+    // Only validate if both example and fields exist
+    if (bodyExample.trim() && bodyFields.length > 0 && contentType === 'application/json') {
+      try {
+        const exampleObj = JSON.parse(bodyExample)
+        const validation = validateBodyConsistency(exampleObj, bodyFields)
+        setBodyValidation(validation)
+      } catch {
+        // Invalid JSON - don't show validation warning (save will catch this)
+        setBodyValidation(null)
+      }
+    } else {
+      // No validation needed
+      setBodyValidation(null)
+    }
+  }, [bodyExample, bodyFields, contentType])
 
   // Handlers for parameter changes
   const handleQueryParamsChange = (newParams: any[]) => {
@@ -309,6 +333,36 @@ export default function EndpointEditor({endpoint, onSave, onCancel}: EndpointEdi
           {activeTab === 'body' && (
             <div className="space-y-4">
               <h4 className="text-md font-semibold text-gray-900">Request Body</h4>
+
+              {/* Schema/Example Mismatch Warning */}
+              {bodyValidation && !bodyValidation.isValid && (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={20} className="text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h5 className="text-sm font-semibold text-yellow-800 mb-1">
+                        Schema/Example Mismatch Detected
+                      </h5>
+                      <p className="text-xs text-yellow-700 mb-2">
+                        The JSON example doesn't match the field schema. Please update either the example or the schema to make them consistent.
+                      </p>
+                      {bodyValidation.missing.length > 0 && (
+                        <p className="text-xs text-yellow-700">
+                          <strong>Missing in example:</strong> {bodyValidation.missing.join(', ')}
+                        </p>
+                      )}
+                      {bodyValidation.extra.length > 0 && (
+                        <p className="text-xs text-yellow-700">
+                          <strong>Extra in example:</strong> {bodyValidation.extra.join(', ')}
+                        </p>
+                      )}
+                      <p className="text-xs text-yellow-600 mt-2 italic">
+                        Note: You can still save, but "Try It" will use schema defaults if there's a mismatch.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Content Type Info */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">

@@ -40,6 +40,9 @@ export interface CanonicalParameter {
   items?: {
     type: string
     example?: any
+    enum?: any[]      // Enum values for array items (Swagger 2.0)
+    default?: any     // Default value for array items (Swagger 2.0)
+    properties?: CanonicalField[]   // If array items are objects (nested fields)
   }
 }
 
@@ -63,6 +66,9 @@ export interface CanonicalField {
   items?: {                         // If type is "array"
     type: string
     example?: any
+    enum?: any[]                    // Enum values for array items
+    default?: any                   // Default value for array items
+    properties?: CanonicalField[]   // If array items are objects (nested fields)
   }
   properties?: CanonicalField[]     // If type is "object" (nested fields)
 

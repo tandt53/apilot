@@ -167,19 +167,47 @@ export function useUpdateEndpoint() {
 
 /**
  * Delete endpoint mutation
+ *
+ * If the endpoint is the last one in its spec, the spec will also be deleted.
  */
 export function useDeleteEndpoint() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: number) => api.deleteEndpoint(id),
-    onSuccess: async (_, id) => {
+    mutationFn: async (id: number) => {
+      // Get endpoint BEFORE deleting (to know specId for cache invalidation)
       const endpoint = await api.getEndpoint(id)
-      if (endpoint) {
-        queryClient.invalidateQueries({ queryKey: endpointsKeys.list(endpoint.specId) })
-        queryClient.invalidateQueries({ queryKey: specsKeys.stats(endpoint.specId) })
+      if (!endpoint) {
+        throw new Error(`Endpoint ${id} not found`)
       }
+
+      // Delete the endpoint
+      await api.deleteEndpoint(id)
+
+      // Check if spec has any remaining endpoints
+      const remainingEndpoints = await api.getEndpointsBySpec(endpoint.specId)
+
+      // If no endpoints remain, delete the spec too
+      if (remainingEndpoints.length === 0) {
+        await api.deleteSpec(endpoint.specId)
+      }
+
+      return { endpoint, specDeleted: remainingEndpoints.length === 0 }
+    },
+    onSuccess: ({ endpoint, specDeleted }) => {
+      // Invalidate endpoints list for this spec
+      queryClient.invalidateQueries({ queryKey: endpointsKeys.list(endpoint.specId) })
+
+      // Invalidate spec stats
+      queryClient.invalidateQueries({ queryKey: specsKeys.stats(endpoint.specId) })
+
+      // Invalidate all endpoints
       queryClient.invalidateQueries({ queryKey: endpointsKeys.all })
+
+      // If spec was deleted, invalidate specs list
+      if (specDeleted) {
+        queryClient.invalidateQueries({ queryKey: specsKeys.all })
+      }
     },
   })
 }
