@@ -97,6 +97,7 @@
     "wait-on": "^9.0.1"
   },
   "build": {
+    "publish": null,
     "productName": "Apilot",
     "appId": "app.apilot.desktop",
     "files": [

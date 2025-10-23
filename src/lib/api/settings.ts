@@ -13,7 +13,7 @@ const SETTINGS_ID = 1
  * Get settings (creates default if not exists)
  */
 export async function getSettings(): Promise<Settings> {
-  let settings = await db.settings.get(SETTINGS_ID)
+  const settings = await db.settings.get(SETTINGS_ID)
 
   if (!settings) {
     // Create default settings

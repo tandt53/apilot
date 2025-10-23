@@ -224,7 +224,10 @@ export default function AssertionsSection({
                           <VariableInput
                             value={newAssertion.field}
                             onChange={(value) => setNewAssertion({ ...newAssertion, field: value })}
-                            variables={selectedEnv?.variables || {}}
+                            variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                             placeholder="e.g., data.id or status"
                           />
                         </div>
@@ -234,7 +237,10 @@ export default function AssertionsSection({
                           <VariableInput
                             value={String(newAssertion.expected)}
                             onChange={(value) => setNewAssertion({ ...newAssertion, expected: value })}
-                            variables={selectedEnv?.variables || {}}
+                            variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                             placeholder="e.g., 200 or 'success'"
                           />
                         </div>
@@ -359,7 +365,10 @@ export default function AssertionsSection({
                               <span className="text-gray-500 mr-1.5">Field:</span>
                               <VariableHighlight
                                 text={String(assertion.field)}
-                                variables={selectedEnv?.variables || {}}
+                                variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                                 className="font-mono"
                                 inline
                               />
@@ -370,7 +379,10 @@ export default function AssertionsSection({
                               <span className="text-gray-500 mr-1.5">Expected:</span>
                               <VariableHighlight
                                 text={String(assertion.expected)}
-                                variables={selectedEnv?.variables || {}}
+                                variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                                 className="font-mono"
                                 inline
                               />
@@ -443,7 +455,10 @@ export default function AssertionsSection({
                 <VariableInput
                   value={newAssertion.field}
                   onChange={(value) => setNewAssertion({ ...newAssertion, field: value })}
-                  variables={selectedEnv?.variables || {}}
+                  variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                   placeholder="e.g., data.id or status"
                 />
               </div>
@@ -453,7 +468,10 @@ export default function AssertionsSection({
                 <VariableInput
                   value={String(newAssertion.expected)}
                   onChange={(value) => setNewAssertion({ ...newAssertion, expected: value })}
-                  variables={selectedEnv?.variables || {}}
+                  variables={{
+                                ...(selectedEnv?.variables || {}),
+                                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                            }}
                   placeholder="e.g., 200 or 'success'"
                 />
               </div>
