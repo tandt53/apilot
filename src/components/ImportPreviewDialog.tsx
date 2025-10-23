@@ -220,14 +220,15 @@ export default function ImportPreviewDialog({
         console.warn('✅ [ImportPreviewDialog] bulkCreateEndpoints complete')
       }
 
-      // Import variables as environment if present
-      if (parsedData.variables && Object.keys(parsedData.variables).length > 0) {
-        await api.createEnvironment({
-          specId: spec.id!,
-          name: 'Imported Variables',
-          baseUrl: parsedData.baseUrl || '',
-          variables: parsedData.variables,
-        })
+      // Auto-create environment from baseUrl and/or variables
+      const environment = await api.createEnvironmentFromParsedSpec(spec.id!, {
+        name: parsedData.name || 'Imported Spec',
+        baseUrl: parsedData.baseUrl,
+        variables: parsedData.variables,
+      })
+
+      if (environment) {
+        console.warn(`✅ [ImportPreviewDialog] Auto-created environment: ${environment.name}`)
       }
 
       onSuccess()

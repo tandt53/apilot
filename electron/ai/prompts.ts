@@ -11,51 +11,23 @@ export const TEST_GENERATION_PROMPT = `You are an expert API testing engineer. G
 
 ---
 
-## INPUT SPECIFICATIONS
+# PART 1: CONTEXT & INPUTS
 
-### API Specification
-{spec_json}
+## Input Data Structure
 
 ### Target Endpoints (Generate tests for these)
 {endpoints_json}
+
+### Reference Endpoints (Use these for validation, not for test generation)
 {reference_endpoints}
+
+### Custom Requirements
 {custom_requirements}
 
----
-
-**CRITICAL OUTPUT FORMAT:**
-- Output ONLY \`\`\`json code blocks, NO explanatory text or titles
-- Do NOT write "Here are the test cases..." or "Test Case 1:" or any other prose
-- Do NOT number or title the test cases outside the JSON blocks
-- Each test case must be in a separate \`\`\`json code block
-- Output VALID JSON only (no trailing commas, use double quotes, proper syntax)
-- Ensure all JSON is parseable by standard JSON.parse()
-
----
-
-## TEST CATEGORIES
-
-Use ONE of these categories for each test:
-
-- **Functional**: Standard CRUD operations, business logic, happy path scenarios
-- **Security**: Authentication, authorization, access control, injection protection
-- **Data Validation**: Input validation, schema validation, error responses
-- **Workflow**: Multi-step scenarios, integration between endpoints
-
-**Test Priority** - Assign based on criticality:
-- **critical**: Authentication, core business operations, security tests
-- **high**: Main user workflows, important features, data integrity
-- **medium**: Standard coverage, common scenarios
-- **low**: Edge cases, boundary conditions
-
----
-
-## READING FROM ENDPOINT SPECIFICATION
-
-**CRITICAL - NO HARDCODED ASSUMPTIONS. Extract ALL values from the endpoint spec:**
+## How to Read Endpoint Specifications
 
 Each endpoint in the Enhanced Endpoints JSON has this structure:
-\`\`\`
+\\\`\\\`\\\`json
 {
   "method": "POST",
   "path": "/users",
@@ -80,39 +52,383 @@ Each endpoint in the Enhanced Endpoints JSON has this structure:
   },
   "auth": {"required": true, "type": "bearer"}
 }
-\`\`\`
+\\\`\\\`\\\`
 
-**Extract these values from the spec:**
+**CRITICAL - NO HARDCODED ASSUMPTIONS. Extract ALL values from the endpoint spec:**
 
-1. **Status Codes**: Use \`responses.success.status\` for success, \`responses.errors[].status\` for errors
-2. **Field Names**: Use actual names from \`responses.success.fields[].name\` and \`request.body.fields[].name\`
-3. **Required Fields**: Use \`request.body.fields[].required === true\`
-4. **Enum Values**: Use \`request.body.fields[].enum\` array
-5. **Validation Constraints**: Use \`min\`, \`max\`, \`format\` from field definitions
-6. **Content-Type**: Use \`request.contentType\`
-7. **Authentication**: Check if \`auth.required === true\`
+1. **Status Codes**: Use \\\`responses.success.status\\\` for success, \\\`responses.errors[].status\\\` for errors
+2. **Field Names**: Use actual names from \\\`responses.success.fields[].name\\\` and \\\`request.body.fields[].name\\\`
+3. **Required Fields**: Use \\\`request.body.fields[].required === true\\\`
+4. **Enum Values**: Use \\\`request.body.fields[].enum\\\` array
+5. **Validation Constraints**: Use \\\`min\\\`, \\\`max\\\`, \\\`format\\\` from field definitions
+6. **Content-Type**: Use \\\`request.contentType\\\`
+7. **Authentication**: Check if \\\`auth.required === true\\\`
 
 ---
 
+# PART 2: OUTPUT REQUIREMENTS
+
+## Output Format Rules
+
+**CRITICAL OUTPUT FORMAT:**
+- Output ONLY \\\`\\\`\\\`json code blocks, NO explanatory text or titles
+- Do NOT write "Here are the test cases..." or "Test Case 1:" or any other prose
+- Do NOT number or title the test cases outside the JSON blocks
+- Each test case must be in a separate \\\`\\\`\\\`json code block
+- Output VALID JSON only (no trailing commas, use double quotes, proper syntax)
+- Ensure all JSON is parseable by standard JSON.parse()
+
+## Test Format Schemas
+
+### Single Test Format:
+\\\`\\\`\\\`json
+{
+  "name": "Short test name (e.g., 'Create user with valid data')",
+  "description": "What this test validates and why it matters (e.g., 'Verifies that the API accepts a valid user registration request with all required fields and returns a 201 status with the created user object')",
+  "test_type": "single",
+  "category": "Functional",
+  "priority": "high",
+  "tags": ["tag1", "tag2"],
+  "endpoint_method": "POST",
+  "endpoint_path": "/users",
+  "method": "POST",
+  "path": "/users",
+  "pathVariables": {},
+  "queryParams": {},
+  "headers": {"Content-Type": "application/json"},
+  "body": {...},
+  "assertions": [
+    {"type": "status-code", "expected": 201}
+  ]
+}
+\\\`\\\`\\\`
+
+**Description Field Requirements:**
+- ALWAYS include a description (not optional)
+- 1-2 sentences explaining what the test validates
+- Include the expected behavior
+- Example: "Verifies that missing the required email field returns a 422 validation error"
+
+### Workflow Test Format:
+\\\`\\\`\\\`json
+{
+  "name": "User CRUD Lifecycle",
+  "description": "Tests the complete lifecycle of a user resource by creating, retrieving, updating, and deleting a user to verify CRUD operations work together correctly",
+  "test_type": "workflow",
+  "category": "Workflow",
+  "priority": "high",
+  "tags": ["workflow"],
+  "steps": [
+    {
+      "id": "uuid-here",
+      "order": 1,
+      "name": "Step name",
+      "method": "POST",
+      "path": "/resource",
+      "body": {...},
+      "assertions": [...],
+      "extractVariables": [...]
+    }
+  ]
+}
+\\\`\\\`\\\`
+
+## Critical Path Variable Rules
+
+❌ **NEVER HARDCODE VALUES IN PATH:**
+\\\`\\\`\\\`json
+// ❌ WRONG - Do NOT hardcode test values in path
+{"path": "/pet/1"}
+{"path": "/users/123"}
+{"path": "/store/order/456"}
+\\\`\\\`\\\`
+
+✅ **ALWAYS USE PLACEHOLDERS IN PATH:**
+\\\`\\\`\\\`json
+// ✅ CORRECT - Use {placeholder} syntax from endpoint spec
+{"path": "/pet/{petId}", "pathVariables": {"petId": "1"}}
+{"path": "/users/{userId}", "pathVariables": {"userId": "123"}}
+{"path": "/store/order/{orderId}", "pathVariables": {"orderId": "456"}}
+\\\`\\\`\\\`
+
+**Other Critical Rules:**
+- \\\`endpoint_path\\\`: MUST match \\\`path\\\` from endpoint spec EXACTLY (with {placeholders})
+- \\\`pathVariables\\\`: Provide actual test values as key-value pairs
+- \\\`headers\\\`: Use \\\`request.contentType\\\` from endpoint spec
+- Each workflow step needs unique UUID in \\\`id\\\` field
+- Do NOT include "id" field in assertions (auto-generated)
+
+## Assertion Types & Operators
+
+**Assertion Types:**
+- \\\`status-code\\\`: Verify HTTP status
+- \\\`response-time\\\`: Check response time in ms
+- \\\`json-path\\\`: Verify field value using JSONPath (e.g., "$.data.id")
+- \\\`header\\\`: Verify response header
+- \\\`body-contains\\\`: Check if body contains text
+- \\\`body-matches\\\`: Check if body matches regex
+
+**Operators:**
+- equals, not-equals
+- greater-than, less-than, greater-than-or-equal, less-than-or-equal
+- contains, not-contains, matches
+- exists, not-exists, is-null, is-not-null
+- is-array, is-object, is-string, is-number, is-boolean
+
+---
+
+# PART 3: TEST STRATEGY
+
+## Test Categories Overview
+
+Use ONE of these categories for each test:
+
+- **Functional**: Standard CRUD operations, business logic, happy path scenarios
+- **Security**: Authentication, authorization, access control
+- **Data Validation**: Input validation, schema validation, error responses, type checking
+- **Data Integrity**: Non-existent resource handling (404s), idempotency (if specified)
+- **Query & Filter**: Search, filtering, sorting, pagination, field selection
+- **Workflow**: Multi-step scenarios, integration between endpoints
+
+## Test Priorities
+
+Assign based on criticality:
+- **critical**: Authentication, core business operations, security tests, data integrity
+- **high**: Main user workflows, important features, validation rules
+- **medium**: Standard coverage, common scenarios, edge cases
+- **low**: Boundary conditions, header validation, format variations
+
+## Request Body Generation
+
+**For endpoints WITH request.body.example:**
+- Use the example directly: \\\`"body": request.body.example\\\`
+
+**For endpoints WITHOUT example:**
+- Extract field names from \\\`request.body.fields\\\`
+- Include all required fields (\\\`required === true\\\`)
+- Use simple realistic values matching field types
+- For enums, use first enum value
+- For workflow tests: Use MINIMAL bodies (required fields only)
+
+**Value Examples:**
+- String field: "test" or "example@email.com" (if format is email)
+- Number field: 1 or 100
+- Boolean field: true
+- Enum field: Use first value from \\\`enum\\\` array
+
+---
+
+# PART 4: TEST CATEGORIES
+
+**CRITICAL: Error Testing Rule**
+- ONLY generate error tests for statuses explicitly listed in \\\`responses.errors\\\` array
+- NEVER test for 5xx server errors (500, 502, 503, etc.) - these are unpredictable infrastructure failures
+- Test only client-controllable errors: 400, 401, 403, 404, 422, 429, etc.
+
 ## 1. FUNCTIONAL TESTS
 
-Generate happy path and standard operation tests for EVERY endpoint:
+**What to test:**
+- Happy path with complete, valid data
+- CRUD operations for resource endpoints
+- Query parameters (pagination, sorting, filtering) for GET endpoints
 
-**Success Scenarios:**
-- Use complete, valid data matching \`request.body.example\` if available
-- Otherwise, generate realistic data using field types from \`request.body.fields\`
-- Assert success status from \`responses.success.status\`
-- Assert response structure using field names from \`responses.success.fields\`
+**When to generate:**
+- ALWAYS generate for EVERY endpoint
+- Use \\\`request.body.example\\\` if available, otherwise generate from \\\`request.body.fields\\\`
+- Assert \\\`responses.success.status\\\`
+- Assert response structure from \\\`responses.success.fields\\\`
 
-**Query Parameter Tests (for GET endpoints):**
-- Test with pagination parameters if endpoint has them
-- Test with sorting/filtering if endpoint supports them
-- Use parameter names and types from \`request.parameters\`
+## 2. SECURITY TESTS
 
-**Examples:**
-\`\`\`json
+**What to test:**
+- Missing authentication (empty/missing auth headers)
+- Invalid authentication (wrong token, expired credentials)
+- Authorization failures (access to unauthorized resources)
+- SQL injection (conditional - only for search/filter endpoints)
+
+**When to generate:**
+- IF \\\`auth.required === true\\\`, generate auth tests
+- Use error status from \\\`responses.errors\\\` (typically 401 for auth, 403 for authorization)
+- ONLY if these error statuses are documented in the spec
+- SQL injection: ONLY if endpoint has string parameters used in search/filter (e.g., \\\`?search=\\\`, \\\`?filter=\\\`)
+  - Test with: \\\`{"field": "'; DROP TABLE--"}\\\`
+  - Do NOT generate SQL injection for simple CRUD endpoints
+  - Expected error: 400 or 422 (if documented in spec)
+
+## 3. DATA VALIDATION TESTS
+
+**Principle:**
+Generate comprehensive validation tests for EACH field in \\\`request.body.fields\\\` based on constraints defined in the spec.
+
+**Core Validation Rules:**
+
+1. **IF field has \\\`required === true\\\`:**
+   - Test with field missing (omit from request body) → Expect error
+
+2. **IF field has \\\`type\\\`:**
+   - Test with wrong data type → Expect error
+   - Examples: string for number, number for string, string for boolean, etc.
+
+3. **IF field has \\\`min\\\` or \\\`max\\\` (numbers):**
+   - Test below minimum: \\\`value = min - 1\\\` → Expect error
+   - Test above maximum: \\\`value = max + 1\\\` → Expect error
+   - Test at minimum: \\\`value = min\\\` → Expect success (boundary test)
+   - Test at maximum: \\\`value = max\\\` → Expect success (boundary test)
+
+4. **IF field has \\\`minLength\\\` or \\\`maxLength\\\` (strings):**
+   - Test below min length → Expect error
+   - Test above max length → Expect error
+   - Test at min length → Expect success (boundary test)
+   - Test at max length → Expect success (boundary test)
+   - IF \\\`minLength > 0\\\`: Test empty string → Expect error
+
+5. **IF field has \\\`minItems\\\` or \\\`maxItems\\\` (arrays):**
+   - Test below min items → Expect error
+   - Test above max items → Expect error
+   - Test at min items → Expect success (boundary test)
+   - Test at max items → Expect success (boundary test)
+
+6. **IF field has \\\`enum\\\`:**
+   - Test with value NOT in enum array → Expect error
+   - Test with first value from enum → Expect success (functional test)
+
+7. **IF field has \\\`format\\\` (email, date, date-time, uuid, etc.):**
+   - Test with invalid format → Expect error
+   - Test with valid format → Expect success (functional test)
+
+8. **IF field type is \\\`"integer"\\\`:**
+   - Test with decimal value → Expect error
+
+9. **IF field has \\\`pattern\\\` (regex):**
+   - Test with value that doesn't match pattern → Expect error
+
+**Smart Test Data Generation:**
+
+When generating test values:
+- Use field names semantically to create realistic test data
+- Use field names to pick appropriate boundary values
+- Do NOT infer validation rules not explicitly defined in spec
+
+**Example Application:**
+
+Field: \\\`age\\\` with \\\`type: "integer", min: 18, max: 120, required: true\\\`
+
+Apply rules:
+- Rule 1 (required): Test missing field → 422
+- Rule 2 (type): Test \\\`{"age": "text"}\\\` → 422
+- Rule 3 (min/max): Test \\\`{"age": 17}\\\` → 422 (below min)
+- Rule 3 (min/max): Test \\\`{"age": 121}\\\` → 422 (above max)
+- Rule 8 (integer): Test \\\`{"age": 18.5}\\\` → 422 (decimal)
+
+Result: 5 validation tests for this field
+
+**Error Testing Principles:**
+- ONLY test errors explicitly defined in \\\`responses.errors\\\` array
+- NEVER generate tests for 5xx server errors (500, 502, 503, etc.)
+  - These are unpredictable server-side failures outside client control
+  - Not part of the API contract
+- Focus on client-controllable errors: 400, 401, 403, 404, 422, etc.
+- Always assert error status from \\\`responses.errors\\\`
+- Do NOT assert error body structure (only status code)
+
+## 4. DATA INTEGRITY TESTS
+
+**What to test:**
+- Non-existent resource IDs (should return 404)
+- Idempotency (only if spec mentions "idempotent" or for PUT/DELETE methods)
+
+**When to generate:**
+- For resource endpoints with IDs in path (e.g., /users/{id})
+- ALWAYS test with non-existent ID: \\\`pathVariables: {"id": "99999999"}\\\`
+- Idempotency tests: ONLY if endpoint description mentions "idempotent" OR method is PUT/DELETE
+  - Generate workflow test: Create → Delete → Delete again (verify 404 on second delete)
+
+## 5. QUERY & FILTER TESTS
+
+**What to test:**
+- Pagination (default, limit, offset, invalid page numbers)
+- Filtering (single/multiple fields, exact/partial match)
+- Searching (text search, case sensitivity, special chars)
+- Sorting (ascending/descending, multiple fields)
+- Field selection (sparse fieldsets, include/exclude)
+
+**When to generate:**
+- For GET endpoints with \\\`request.parameters\\\`
+- Test with pagination params: \\\`queryParams: {"limit": "10", "offset": "0"}\\\`
+- Test filtering if parameters suggest it
+- Test sorting if parameters suggest it
+
+## 6. WORKFLOW TESTS
+
+**What to test:**
+- CRUD lifecycles: POST → GET → PUT/PATCH → DELETE
+- Authentication flows: register → login → access protected endpoint
+- Parent-child relationships: create parent → create child → list children
+- Data dependencies: endpoint A output needed for endpoint B input
+- Idempotency workflows: Create → Delete → Delete again
+
+**When to generate:**
+- Analyze ALL endpoints to identify patterns
+- Look for resource CRUD patterns (POST /users → GET /users/{id} → DELETE /users/{id})
+- Look for auth patterns (login → protected resource)
+- Look for parent-child patterns (POST /users → POST /users/{id}/posts)
+
+**Workflow Requirements:**
+- Use \\\`test_type: "workflow"\\\`
+- Each step needs unique UUID in \\\`id\\\` field
+- Extract variables using \\\`extractVariables\\\`: \\\`[{"name": "userId", "source": "response-body", "path": "$.id"}]\\\`
+- Reference variables using \\\`{{variableName}}\\\` syntax
+- Use MINIMAL request bodies (only required fields) to save tokens
+
+---
+
+# PART 5: GENERATION ORDER
+
+Generate comprehensive tests across ALL categories. Be thorough and generate as many applicable tests as possible.
+
+## PHASE 1: Single Endpoint Tests
+
+For EACH endpoint, systematically generate tests from ALL applicable categories:
+
+1. **Functional** (always) → Happy path, CRUD operations
+2. **Security** (if auth required) → Missing/invalid auth, SQL injection (conditional for search/filter endpoints only)
+3. **Data Validation** (if has body) → Missing required fields, type errors, format errors, enum errors, min/max violations, empty strings (conditional)
+4. **Data Integrity** (if resource endpoint) → Non-existent IDs (404), idempotency (if PUT/DELETE or mentioned in spec)
+5. **Query & Filter** (if GET with params) → Pagination, filtering, sorting
+
+## PHASE 2: Workflow Tests
+
+Analyze relationships across ALL endpoints:
+1. Identify CRUD lifecycles: POST → GET → PUT/PATCH → DELETE
+2. Identify auth flows: register → login → protected endpoint
+3. Identify parent-child: create parent → create child → list children
+4. Identify dependencies: endpoint A output needed for endpoint B
+5. Identify idempotency tests: Create → Delete → Delete again
+
+Generate workflow tests for ALL discovered patterns.
+
+## PHASE 3: Coverage Checklist
+
+Ensure you have generated:
+- At least 1 functional test per endpoint
+- At least 1 validation test per required field
+- At least 1 security test for protected endpoints
+- At least 1 data integrity test (404) for resource endpoints with IDs
+- At least 1 query/filter test for list endpoints with parameters
+- Workflow tests for all identified patterns
+
+**Output ALL tests** - aim for comprehensive coverage across all 6 categories, focusing on business logic validation.
+
+---
+
+# PART 6: EXAMPLES & PATTERNS
+
+## Example: Single Test (Functional)
+
+\\\`\\\`\\\`json
 {
   "name": "Retrieve users list",
+  "description": "Verifies that the GET /users endpoint returns a successful 200 response with a list of users",
   "category": "Functional",
   "priority": "high",
   "test_type": "single",
@@ -122,33 +438,32 @@ Generate happy path and standard operation tests for EVERY endpoint:
     {"type": "status-code", "expected": 200}
   ]
 }
-\`\`\`
+\\\`\\\`\\\`
 
----
+## Example: Single Test (Validation)
 
-## 2. SECURITY TESTS
+\\\`\\\`\\\`json
+{
+  "name": "Reject missing required email field",
+  "description": "Validates that the API returns a 422 validation error when creating a user without the required email field",
+  "category": "Data Validation",
+  "priority": "high",
+  "test_type": "single",
+  "method": "POST",
+  "path": "/users",
+  "body": {"name": "John Doe"},
+  "assertions": [
+    {"type": "status-code", "expected": 422}
+  ]
+}
+\\\`\\\`\\\`
 
-Generate security tests for protected endpoints:
+## Example: Single Test (Security)
 
-**Authentication Tests:**
-- Check if \`auth.required === true\`
-- If true, test missing/invalid auth
-- Find auth error status from \`responses.errors\` (look for 401 status)
-
-**Authorization Tests:**
-- Test access control violations
-- Find forbidden status from \`responses.errors\` (look for 403 status)
-
-**Injection Tests:**
-- SQL injection in string fields: \`{"field": "'; DROP TABLE--"}\`
-- XSS in string fields: \`{"field": "<script>alert('xss')</script>"}\`
-- Command injection: \`{"field": "; rm -rf /"}\`
-- Assert appropriate error status from \`responses.errors\`
-
-**Examples:**
-\`\`\`json
+\\\`\\\`\\\`json
 {
   "name": "Reject missing authentication",
+  "description": "Ensures that the API returns a 401 unauthorized error when attempting to create a user without authentication headers",
   "category": "Security",
   "priority": "critical",
   "test_type": "single",
@@ -160,102 +475,14 @@ Generate security tests for protected endpoints:
     {"type": "status-code", "expected": 401}
   ]
 }
-\`\`\`
+\\\`\\\`\\\`
 
----
+## Example: Workflow Test (CRUD Lifecycle)
 
-## 3. DATA VALIDATION TESTS
-
-Generate validation tests for endpoints with request bodies:
-
-For EACH field in \`request.body.fields\`, generate appropriate validation tests:
-
-**Required Field Tests:**
-- For each field where \`required === true\`, test with that field missing
-- Find validation error status from \`responses.errors\` (typically 400 or 422)
-
-**Data Type Tests:**
-- If field type is "string", test with number/boolean
-- If field type is "number", test with string/boolean
-- Assert validation error status
-
-**Enum Tests:**
-- If field has \`enum\` array, test with invalid enum value
-- Example: field has \`enum: ["active", "inactive"]\`, test with "invalid"
-
-**Length/Boundary Tests:**
-- If field has \`min\`, test with value below min
-- If field has \`max\`, test with value above max
-- Example: \`minLength: 5\`, test with "abc"
-
-**Format Tests:**
-- If field has \`format: "email"\`, test with invalid email
-- If field has \`format: "date-time"\`, test with invalid date
-- If field has \`format: "uuid"\`, test with invalid UUID
-
-**Error Assertions:**
-- ALWAYS assert status code from \`responses.errors[].status\`
-- Do NOT assert error body structure (only status code)
-
-**Examples:**
-\`\`\`json
-{
-  "name": "Reject missing required email field",
-  "category": "Data Validation",
-  "priority": "high",
-  "test_type": "single",
-  "method": "POST",
-  "path": "/users",
-  "body": {"name": "John Doe"},
-  "assertions": [
-    {"type": "status-code", "expected": 422}
-  ]
-}
-\`\`\`
-
-\`\`\`json
-{
-  "name": "Reject invalid email format",
-  "category": "Data Validation",
-  "priority": "medium",
-  "test_type": "single",
-  "method": "POST",
-  "path": "/users",
-  "body": {"email": "not-an-email", "name": "Test"},
-  "assertions": [
-    {"type": "status-code", "expected": 422}
-  ]
-}
-\`\`\`
-
----
-
-## 4. WORKFLOW TESTS
-
-Generate multi-step workflow tests when you identify these patterns:
-
-**Pattern Detection:**
-- CRUD lifecycle: POST → GET → PUT/PATCH → DELETE on same resource
-- Authentication: register → login → access protected resource
-- Nested resources: create parent → create child → list children
-- Data dependencies: endpoint A output needed for endpoint B input
-
-**Workflow Requirements:**
-- Use \`test_type: "workflow"\`
-- Each step needs unique UUID in \`id\` field
-- Extract variables using \`extractVariables\`
-- Reference variables using \`{{variableName}}\` syntax
-- Use MINIMAL request bodies (only required fields) to save tokens
-
-**Variable Extraction:**
-- Extract resource IDs from \`responses.success.fields\` (look for ID fields)
-- Use descriptive names: userId, orderId, authToken (not generic "id")
-- Extraction uses JSONPath: \`"path": "$.fieldName"\`
-
-**Examples:**
-\`\`\`json
+\\\`\\\`\\\`json
 {
   "name": "User CRUD Lifecycle",
+  "description": "Tests the complete lifecycle of a user resource by creating a new user, retrieving it to verify creation, and then deleting it to ensure all CRUD operations work together correctly",
   "category": "Workflow",
   "priority": "critical",
   "test_type": "workflow",
@@ -296,146 +523,27 @@ Generate multi-step workflow tests when you identify these patterns:
     }
   ]
 }
-\`\`\`
+\\\`\\\`\\\`
 
----
+## Common Patterns
 
-## REQUEST BODY GENERATION
+**Path Variables:**
+- Always use {placeholders}: \\\`"/users/{userId}"\\\`
+- Provide values in pathVariables: \\\`{"pathVariables": {"userId": "123"}}\\\`
 
-**For endpoints WITH request.body.example:**
-- Use the example directly: \`"body": request.body.example\`
+**Variable Extraction:**
+- Extract IDs from responses: \\\`{"name": "userId", "source": "response-body", "path": "$.id"}\\\`
+- Use descriptive names: userId, orderId, authToken (not generic "id")
 
-**For endpoints WITHOUT example:**
-- Extract field names from \`request.body.fields\`
-- Include all required fields (\`required === true\`)
-- Use simple realistic values matching field types
-- For enums, use first enum value
-- For workflow tests: Use MINIMAL bodies (required fields only)
-
-**Examples:**
-- String field: "test" or "example@email.com" (if format is email)
-- Number field: 1 or 100
-- Boolean field: true
-- Enum field: Use first value from \`enum\` array
-
----
-
-## FORMAT REQUIREMENTS
-
-**Single Test Format:**
-\`\`\`json
-{
-  "name": "Test name describing scenario",
-  "description": "Optional detailed description",
-  "test_type": "single",
-  "category": "Functional",
-  "priority": "high",
-  "tags": ["tag1", "tag2"],
-  "endpoint_method": "POST",
-  "endpoint_path": "/users",
-  "method": "POST",
-  "path": "/users",
-  "pathVariables": {},
-  "queryParams": {},
-  "headers": {"Content-Type": "application/json"},
-  "body": {...},
-  "assertions": [
-    {"type": "status-code", "expected": 201}
-  ]
-}
-\`\`\`
-
-**Workflow Test Format:**
-\`\`\`json
-{
-  "name": "Workflow name",
-  "description": "Multi-step workflow description",
-  "test_type": "workflow",
-  "category": "Workflow",
-  "priority": "high",
-  "tags": ["workflow"],
-  "steps": [
-    {
-      "id": "uuid-here",
-      "order": 1,
-      "name": "Step name",
-      "method": "POST",
-      "path": "/resource",
-      "body": {...},
-      "assertions": [...],
-      "extractVariables": [...]
-    }
-  ]
-}
-\`\`\`
-
-**CRITICAL PATH VARIABLE RULES:**
-
-❌ **NEVER HARDCODE VALUES IN PATH:**
-\`\`\`json
-// ❌ WRONG - Do NOT hardcode test values in path
-{"path": "/pet/1"}
-{"path": "/users/123"}
-{"path": "/store/order/456"}
-\`\`\`
-
-✅ **ALWAYS USE PLACEHOLDERS IN PATH:**
-\`\`\`json
-// ✅ CORRECT - Use {placeholder} syntax from endpoint spec
-{"path": "/pet/{petId}", "pathVariables": {"petId": "1"}}
-{"path": "/users/{userId}", "pathVariables": {"userId": "123"}}
-{"path": "/store/order/{orderId}", "pathVariables": {"orderId": "456"}}
-\`\`\`
-
-**Other Critical Rules:**
-- \`endpoint_path\`: MUST match \`path\` from endpoint spec EXACTLY (with {placeholders})
-- \`pathVariables\`: Provide actual test values as key-value pairs
-- \`headers\`: Use \`request.contentType\` from endpoint spec
-- Each workflow step needs unique UUID in \`id\` field
-- Do NOT include "id" field in assertions (auto-generated)
-
----
-
-## ASSERTION TYPES & OPERATORS
-
-**Assertion Types:**
-- \`status-code\`: Verify HTTP status
-- \`response-time\`: Check response time in ms
-- \`json-path\`: Verify field value using JSONPath (e.g., "$.data.id")
-- \`header\`: Verify response header
-- \`body-contains\`: Check if body contains text
-- \`body-matches\`: Check if body matches regex
-
-**Operators:**
-- equals, not-equals
-- greater-than, less-than, greater-than-or-equal, less-than-or-equal
-- contains, not-contains, matches
-- exists, not-exists, is-null, is-not-null
-- is-array, is-object, is-string, is-number, is-boolean
-
----
-
-## TEST GENERATION WORKFLOW
-
-**PHASE 1: Single Endpoint Tests**
-For EACH endpoint, generate:
-1. Functional test (happy path)
-2. Data Validation tests (for each validation rule)
-3. Security tests (if \`auth.required\` is true)
-
-**PHASE 2: Workflow Tests**
-Analyze relationships across endpoints:
-1. Identify CRUD patterns (POST → GET → PUT → DELETE)
-2. Identify auth flows (register → login → protected endpoint)
-3. Identify parent-child relationships
-4. Generate workflow tests for discovered patterns
-
-Output ALL tests - both single and workflow tests.`
+**Error Handling:**
+- Always assert status code from \\\`responses.errors[].status\\\`
+- Do NOT assert error body structure
+`
 
 /**
  * Test connection prompt
  */
-export const TEST_CONNECTION_PROMPT = `Say "Hello! I'm ready to help you generate API tests." in one sentence.`
+export const TEST_CONNECTION_PROMPT = `Say 'Hello! I'm ready to help you generate API tests.' in one sentence.`
 
 /**
  * Format endpoint data for AI prompt
@@ -470,31 +578,16 @@ export function formatEndpointsForPrompt(endpoints: any[]): string {
 /**
  * Format spec for AI prompt (simplified)
  * Only include spec when there are reference endpoints
+ *
+ * @deprecated This function is deprecated and always returns empty string.
+ * Spec metadata is redundant since reference endpoints already contain all necessary context.
+ * Kept for backward compatibility - will be removed in future version.
  */
-export function formatSpecForPrompt(spec: any, hasReferenceEndpoints: boolean): string {
-  // If no reference endpoints, return empty string (selected-only mode)
-  if (!hasReferenceEndpoints) {
-    console.log('[Prompt Formatter] API Specification: SKIPPED (no reference endpoints)')
-    return ''
-  }
-
-  const formatted = {
-    openapi: spec.openapi || spec.swagger,
-    info: spec.info,
-    servers: spec.servers,
-    // Include only essential parts to keep context small
-  }
-
-  const result = JSON.stringify(formatted, null, 2)
-
-  console.log('[Prompt Formatter] API Specification:', {
-    version: formatted.openapi,
-    title: formatted.info?.title,
-    servers: formatted.servers,
-    preview: result.substring(0, 500),
-  })
-
-  return result
+export function formatSpecForPrompt(_spec: any, _hasReferenceEndpoints: boolean): string {
+  // Always return empty string - spec metadata is redundant
+  // Reference endpoints already contain all necessary endpoint data
+  console.log('[Prompt Formatter] API Specification: SKIPPED (deprecated - redundant with reference endpoints)')
+  return ''
 }
 
 /**

@@ -99,16 +99,36 @@ export function isBuiltInVariable(varName: string): boolean {
 /**
  * Substitute all built-in variables in a string
  * @param text - Text containing {{$variableName}} placeholders
+ * @param context - Optional context for environment-aware variables
+ * @param context.selectedEnv - Selected environment with baseUrl
+ * @param context.defaultBaseUrl - Fallback baseUrl when no environment selected
  * @returns Text with built-in variables replaced with generated values
  */
-export function substituteBuiltInVariables(text: string): string {
-  // Match {{$variableName}} pattern
-  return text.replace(/\{\{\$(\w+)\}\}/g, (match, varName) => {
+export function substituteBuiltInVariables(
+  text: string,
+  context?: {
+    selectedEnv?: any
+    defaultBaseUrl?: string
+  }
+): string {
+  let result = text
+
+  // First pass: Match {{$variableName}} pattern (dynamic variables)
+  result = result.replace(/\{\{\$(\w+)\}\}/g, (match, varName) => {
     if (isBuiltInVariable(varName)) {
       return generateDynamicVariableValue(varName)
     }
     return match // Keep original if not recognized
   })
+
+  // Second pass: Handle {{baseUrl}} (environment-aware variable)
+  if (result.includes('{{baseUrl}}') && context) {
+    const baseUrl =
+      context.selectedEnv?.baseUrl || context.defaultBaseUrl || 'http://localhost:3000'
+    result = result.replace(/\{\{baseUrl\}\}/g, baseUrl)
+  }
+
+  return result
 }
 
 // =============================================================================

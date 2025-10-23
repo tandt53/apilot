@@ -169,7 +169,7 @@ describe('AI Prompt Formatters', () => {
     })
   })
 
-  describe('formatSpecForPrompt - CRITICAL (Recently Fixed)', () => {
+  describe('formatSpecForPrompt - DEPRECATED (Backward Compatibility)', () => {
     const mockSpec = {
       openapi: '3.0.0',
       info: {
@@ -183,31 +183,21 @@ describe('AI Prompt Formatters', () => {
       paths: {}, // Not included in formatted output
     }
 
-    it('should return empty string when hasReferenceEndpoints is false (selected-only mode)', () => {
+    it('should return empty string when hasReferenceEndpoints is false', () => {
       const result = formatSpecForPrompt(mockSpec, false)
 
       expect(result).toBe('')
     })
 
-    it('should include spec when hasReferenceEndpoints is true (reference mode)', () => {
+    it('should return empty string when hasReferenceEndpoints is true (deprecated behavior)', () => {
+      // Function is deprecated and now always returns empty string
+      // Spec metadata is redundant since reference endpoints contain all necessary data
       const result = formatSpecForPrompt(mockSpec, true)
 
-      expect(result).toBeTruthy()
-      expect(result.length).toBeGreaterThan(0)
-      expect(result).toContain('"openapi": "3.0.0"')
-      expect(result).toContain('"title": "Test API"')
+      expect(result).toBe('')
     })
 
-    it('should include essential spec fields only', () => {
-      const result = formatSpecForPrompt(mockSpec, true)
-
-      expect(result).toContain('"openapi"')
-      expect(result).toContain('"info"')
-      expect(result).toContain('"servers"')
-      expect(result).not.toContain('"paths"') // Should exclude paths
-    })
-
-    it('should handle Swagger 2.0 specs', () => {
+    it('should return empty string for Swagger 2.0 specs (deprecated behavior)', () => {
       const swaggerSpec = {
         swagger: '2.0',
         info: {
@@ -220,12 +210,10 @@ describe('AI Prompt Formatters', () => {
 
       const result = formatSpecForPrompt(swaggerSpec, true)
 
-      // formatSpecForPrompt normalizes to 'openapi' key
-      expect(result).toContain('"openapi"')
-      expect(result).toContain('"title": "Pet Store"')
+      expect(result).toBe('')
     })
 
-    it('should handle spec with no servers', () => {
+    it('should return empty string for spec with no servers (deprecated behavior)', () => {
       const specNoServers = {
         openapi: '3.0.0',
         info: { title: 'Test', version: '1.0.0' },
@@ -233,15 +221,13 @@ describe('AI Prompt Formatters', () => {
 
       const result = formatSpecForPrompt(specNoServers, true)
 
-      expect(result).toContain('"openapi"')
-      expect(result).toContain('"info"')
+      expect(result).toBe('')
     })
 
     it('should handle null/undefined spec gracefully', () => {
       const result1 = formatSpecForPrompt(null as any, false)
       const result2 = formatSpecForPrompt(undefined as any, false)
 
-      // Should return empty string when no references
       expect(result1).toBe('')
       expect(result2).toBe('')
     })
@@ -442,12 +428,11 @@ describe('AI Prompt Formatters', () => {
       }
 
       const endpointsJson = formatEndpointsForPrompt(endpoints)
-      const specJson = formatSpecForPrompt(spec, true) // Has references
+      const specJson = formatSpecForPrompt(spec, true) // Deprecated - always returns empty
       const referenceJson = formatReferenceEndpointsForPrompt(allEndpoints)
 
       expect(endpointsJson).toBeTruthy()
-      expect(specJson).toBeTruthy() // Should include spec
-      expect(specJson).toContain('openapi')
+      expect(specJson).toBe('') // Deprecated - always returns empty
       expect(referenceJson).toBeTruthy() // Should include references
       expect(referenceJson).toContain('REFERENCE ENDPOINTS')
     })
@@ -481,11 +466,11 @@ describe('AI Prompt Formatters', () => {
       }
 
       const endpointsJson = formatEndpointsForPrompt(targetEndpoints)
-      const specJson = formatSpecForPrompt(spec, true) // Has references
+      const specJson = formatSpecForPrompt(spec, true) // Deprecated - always returns empty
       const referenceJson = formatReferenceEndpointsForPrompt(referenceEndpoints)
 
       expect(endpointsJson).toContain('Create order')
-      expect(specJson).toBeTruthy()
+      expect(specJson).toBe('') // Deprecated - always returns empty
       expect(referenceJson).toContain('Get users')
       expect(referenceJson).toContain('REFERENCE ENDPOINTS')
     })

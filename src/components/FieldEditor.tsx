@@ -234,7 +234,10 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
         <VariableInput
           value={value}
           onChange={(newValue) => onTestValueChange?.(newValue)}
-          variables={selectedEnv?.variables || {}}
+          variables={{
+            ...(selectedEnv?.variables || {}),
+            ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+          }}
           placeholder={field.example || `Enter ${field.name}`}
           className="text-sm"
         />

@@ -261,4 +261,81 @@ describe('Dynamic Variables', () => {
       expect(value).toBe('{{$notAVariable}}')
     })
   })
+
+  describe('substituteBuiltInVariables with {{baseUrl}}', () => {
+    it('should substitute {{baseUrl}} with environment baseUrl', () => {
+      const result = substituteBuiltInVariables('{{baseUrl}}/api/users', {
+        selectedEnv: { baseUrl: 'https://production.com' },
+      })
+      expect(result).toBe('https://production.com/api/users')
+    })
+
+    it('should use defaultBaseUrl when no environment selected', () => {
+      const result = substituteBuiltInVariables('{{baseUrl}}/api/users', {
+        defaultBaseUrl: 'http://localhost:8080',
+      })
+      expect(result).toBe('http://localhost:8080/api/users')
+    })
+
+    it('should fallback to localhost:3000 when no baseUrl in context', () => {
+      const result = substituteBuiltInVariables('{{baseUrl}}/api/users', {})
+      expect(result).toBe('http://localhost:3000/api/users')
+    })
+
+    it('should preserve {{baseUrl}} when no context provided', () => {
+      const result = substituteBuiltInVariables('{{baseUrl}}/api/users')
+      expect(result).toBe('{{baseUrl}}/api/users')
+    })
+
+    it('should substitute multiple {{baseUrl}} occurrences', () => {
+      const result = substituteBuiltInVariables(
+        'Primary: {{baseUrl}}/api/v1, Secondary: {{baseUrl}}/api/v2',
+        {
+          selectedEnv: { baseUrl: 'https://api.example.com' },
+        }
+      )
+      expect(result).toBe(
+        'Primary: https://api.example.com/api/v1, Secondary: https://api.example.com/api/v2'
+      )
+    })
+
+    it('should substitute {{baseUrl}} along with built-in variables', () => {
+      const result = substituteBuiltInVariables(
+        '{{baseUrl}}/users/{{$uuid}}',
+        {
+          selectedEnv: { baseUrl: 'https://api.example.com' },
+        }
+      )
+
+      expect(result).toContain('https://api.example.com/users/')
+      expect(result).not.toContain('{{baseUrl}}')
+      expect(result).not.toContain('{{$uuid}}')
+      expect(result).toMatch(/https:\/\/api\.example\.com\/users\/[0-9a-f-]{36}/i)
+    })
+
+    it('should handle {{baseUrl}} in JSON', () => {
+      const json = JSON.stringify({
+        url: '{{baseUrl}}/api/users',
+        id: '{{$uuid}}',
+      })
+
+      const result = substituteBuiltInVariables(json, {
+        selectedEnv: { baseUrl: 'https://api.example.com' },
+      })
+
+      expect(result).toContain('https://api.example.com/api/users')
+      expect(result).not.toContain('{{baseUrl}}')
+      expect(result).not.toContain('{{$uuid}}')
+
+      // Should still be valid JSON
+      expect(() => JSON.parse(result)).not.toThrow()
+    })
+
+    it('should preserve {{baseUrl}} with trailing slashes correctly', () => {
+      const result = substituteBuiltInVariables('{{baseUrl}}/api/users', {
+        selectedEnv: { baseUrl: 'https://api.example.com/' },
+      })
+      expect(result).toBe('https://api.example.com//api/users')
+    })
+  })
 })

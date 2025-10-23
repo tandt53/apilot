@@ -12,6 +12,7 @@ import PageLayout from '@/components/PageLayout'
 import Button from '@/components/Button'
 import ImportPreviewDialog from '@/components/ImportPreviewDialog'
 import TestGenerationConfigModal, {TestGenerationConfig} from '@/components/TestGenerationConfigModal'
+import SpecEditDialog, {SpecUpdateData} from '@/components/SpecEditDialog'
 import type {Endpoint, Spec} from '@/types/database'
 import {generateTestsViaIPC} from "@/lib/ai/client.ts";
 
@@ -85,6 +86,10 @@ export default function SpecsNew() {
     data: any
     detection: any
   } | null>(null)
+
+  // Edit spec state
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editingSpec, setEditingSpec] = useState<Spec | null>(null)
 
   // Batch test generation states
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<number>>(new Set())
@@ -268,9 +273,17 @@ export default function SpecsNew() {
     await refetch()
   }
 
-  const handleEditSpec = (_specId: number) => {
-    // TODO: Implement edit spec modal/page
-    alert('Edit spec feature coming soon')
+  const handleEditSpec = (spec: Spec) => {
+    setEditingSpec(spec)
+    setShowEditDialog(true)
+  }
+
+  const handleSaveSpec = async (updates: SpecUpdateData) => {
+    if (!editingSpec) return
+
+    await api.updateSpec(editingSpec.id!, updates)
+    await queryClient.invalidateQueries({ queryKey: ['specs'] })
+    await refetch()
   }
 
   const handleExportSpec = async (spec: Spec) => {
@@ -1121,9 +1134,8 @@ export default function SpecsNew() {
                       variant="ghost"
                       size="sm"
                       icon={Edit3}
-                      onClick={() => handleEditSpec(selectedSpec.id!)}
-                      title="Edit spec metadata (coming soon)"
-                      disabled
+                      onClick={() => handleEditSpec(selectedSpec)}
+                      title="Edit spec metadata"
                     />
                     <Button
                       variant="ghost"
@@ -1294,6 +1306,16 @@ export default function SpecsNew() {
         }
         onConfirm={handleGenerateWithConfig}
       />
+
+      {/* Spec Edit Dialog */}
+      {editingSpec && (
+        <SpecEditDialog
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          spec={editingSpec}
+          onSave={handleSaveSpec}
+        />
+      )}
     </>
   )
 }

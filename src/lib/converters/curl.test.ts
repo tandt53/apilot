@@ -241,6 +241,36 @@ describe('convertCurlToCanonical', () => {
       expect(endpoint.request?.contentType).toBe('application/json')
       expect(endpoint.request?.body).toBeDefined()
     })
+
+    it('should handle --data-raw flag correctly (BUG-013)', () => {
+      // Bug: --data-raw was matching only --data, causing "-raw" to be parsed as body
+      // Fix: Reorder regex alternatives to match longer strings first
+      const curl = `curl --location 'https://uat-airnix-api.bluebelt.asia/api/auth/login' \\
+--header 'accept: /*' \\
+--header 'Content-Type: application/json' \\
+--data-raw '{
+  "email": "thunx@bluebelt.asia",
+  "password": "123456"
+}'`
+
+      const endpoint = convertCurlToCanonical(curl)
+
+      expect(endpoint.method).toBe('POST')
+      expect(endpoint.path).toBe('/api/auth/login')
+      expect(endpoint.request?.contentType).toBe('application/json')
+      expect(endpoint.request?.body).toBeDefined()
+
+      // Verify body is parsed as JSON object (not string "-raw")
+      expect(typeof endpoint.request?.body?.example).toBe('object')
+      expect(endpoint.request?.body?.example).toHaveProperty('email', 'thunx@bluebelt.asia')
+      expect(endpoint.request?.body?.example).toHaveProperty('password', '123456')
+
+      // Verify fields were extracted correctly
+      expect(endpoint.request?.body?.fields).toHaveLength(2)
+      const fieldNames = endpoint.request?.body?.fields.map((f: any) => f.name)
+      expect(fieldNames).toContain('email')
+      expect(fieldNames).toContain('password')
+    })
   })
 
   describe('Complex Examples', () => {

@@ -81,7 +81,7 @@ export default function RequestTester({
             return initialSession.lastUrl
         }
 
-        const baseUrl = selectedEnv?.baseUrl || 'https://api.example.com'
+        // Use {{baseUrl}} template to show environment-aware URL
         let path = endpoint.path
 
         if (endpoint.request?.parameters) {
@@ -93,7 +93,8 @@ export default function RequestTester({
             })
         }
 
-        return `${baseUrl}${path}`
+        // Return template with {{baseUrl}} variable (e.g., "{{baseUrl}}/api/users/1")
+        return `{{baseUrl}}${path}`
     })
 
     const [method] = useState(endpoint.method || 'GET')
@@ -352,8 +353,7 @@ export default function RequestTester({
 
         console.log('[RequestTester] No session found, initializing from defaults')
 
-        // Reset URL
-        const baseUrl = selectedEnv?.baseUrl || 'https://api.example.com'
+        // Reset URL with {{baseUrl}} template
         let path = endpoint.path
         if (endpoint.request?.parameters) {
             endpoint.request.parameters.forEach((param: any) => {
@@ -363,7 +363,7 @@ export default function RequestTester({
                 }
             })
         }
-        setUrl(`${baseUrl}${path}`)
+        setUrl(`{{baseUrl}}${path}`)
 
         // Reset headers from testCase or endpoint
         const initialHeaders: Record<string, string> = testCase.headers || {}
@@ -551,9 +551,11 @@ export default function RequestTester({
     }, [hasChanges, onHasChanges])
 
     const substituteVariables = (text: string, variables: Record<string, string>): string => {
-        // First pass: substitute built-in dynamic variables ({{$variableName}})
-        // Import is at top of file
-        let result = substituteBuiltInVariables(text)
+        // First pass: substitute built-in variables ({{$variableName}}) and {{baseUrl}}
+        let result = substituteBuiltInVariables(text, {
+            selectedEnv,
+            defaultBaseUrl: 'http://localhost:3000'
+        })
 
         // Second pass: substitute environment variables ({{variableName}})
         Object.entries(variables).forEach(([key, value]) => {
@@ -572,15 +574,15 @@ export default function RequestTester({
         try {
             const startTime = Date.now()
 
-            const envVariables = selectedEnv?.variables || {}
+            // Combine environment variables with baseUrl
+            const envVariables = {
+                ...(selectedEnv?.variables || {}),
+                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+            }
 
             // Always substitute variables (built-in + environment)
+            // This now includes {{baseUrl}} substitution
             requestUrl = substituteVariables(requestUrl, envVariables)
-
-            if (selectedEnv?.baseUrl) {
-                const urlObj = new URL(requestUrl)
-                requestUrl = `${selectedEnv.baseUrl}${urlObj.pathname}${urlObj.search}`
-            }
 
             if (Object.keys(params).length > 0) {
                 const substitutedParams: Record<string, string> = {}
@@ -873,7 +875,10 @@ export default function RequestTester({
                                 <VariableInput
                                     value={url}
                                     onChange={setUrl}
-                                    variables={selectedEnv?.variables || {}}
+                                    variables={{
+                                        ...(selectedEnv?.variables || {}),
+                                        ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+                                    }}
                                     disabled={readOnly}
                                     placeholder="Enter URL"
                                 />

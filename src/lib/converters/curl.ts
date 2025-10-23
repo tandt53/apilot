@@ -144,8 +144,9 @@ function parseCurlCommand(command: string): ParsedCurl {
   // Extract body (-d, --data, --data-raw, --data-binary)
   // Collect ALL data flags and concatenate them
   // IMPORTANT: Use separate patterns for single vs double quotes to allow internal quotes
+  // IMPORTANT: Longer alternatives must come first (--data-raw before --data)
   // Example: -d '{"key": "value"}' should capture the full JSON, not stop at internal "
-  const dataRegex = /(?:-d|--data|--data-raw|--data-binary)(?:=|\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/g
+  const dataRegex = /(?:--data-raw|--data-binary|--data|-d)(?:=|\s+)?(?:'([^']*)'|"([^"]*)"|(\S+))/g
   let dataMatch
   const dataParts: string[] = []
   while ((dataMatch = dataRegex.exec(normalized)) !== null) {
