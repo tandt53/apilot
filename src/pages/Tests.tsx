@@ -442,12 +442,8 @@ export default function Tests() {
 
   // Combine header changes with request changes
   useEffect(() => {
-    // Update hasUnsavedChanges based on both header and request changes
-    setHasUnsavedChanges((prevHasChanges) => {
-      // If there are header changes, we have unsaved changes
-      // Otherwise, respect the existing state from RequestTester
-      return hasHeaderChanges || prevHasChanges
-    })
+    // Update hasUnsavedChanges based on header changes (includes steps changes)
+    setHasUnsavedChanges(hasHeaderChanges)
   }, [hasHeaderChanges])
 
   // Get selected spec - memoized to prevent recalculation

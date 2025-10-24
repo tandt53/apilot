@@ -1,5 +1,12 @@
-import {File, Plus, Upload, X} from 'lucide-react'
-import VariableInput from './VariableInput'
+import {useState} from 'react'
+import {Plus, X, Upload} from 'lucide-react'
+
+/**
+ * SchemaEditor - Define/edit field structure (API contract definition)
+ *
+ * Used for editing endpoint specifications (params, headers, body fields)
+ * Supports nested objects and arrays with type validation per context
+ */
 
 export interface Field {
   name: string
@@ -69,95 +76,79 @@ function getAllowedItemTypes(context: FieldContext): string[] {
   }
 }
 
-interface FieldEditorProps {
+interface SchemaEditorProps {
   fields: Field[]
-  onFieldsChange?: (fields: Field[]) => void
-  mode: 'view' | 'edit' | 'test'
+  onChange: (fields: Field[]) => void
+
   title?: string
   emptyMessage?: string
   depth?: number
   maxDepth?: number
   context?: FieldContext
-  // Test mode props
-  testValues?: Record<string, any>
-  onTestValuesChange?: (values: Record<string, any>) => void
-  selectedEnv?: any
+  readOnly?: boolean
 }
 
-export default function FieldEditor({
+export default function SchemaEditor({
   fields,
-  onFieldsChange,
-  mode,
+  onChange,
   title = 'Fields',
   emptyMessage = 'No fields defined',
   depth = 0,
   maxDepth = 4,
   context = 'body-json',
-  testValues = {},
-  onTestValuesChange,
-  selectedEnv
-}: FieldEditorProps) {
-  const isEditable = mode === 'edit' && !!onFieldsChange
+  readOnly = false,
+}: SchemaEditorProps) {
   const canNest = depth < maxDepth
 
-  const handleAddField = (newField: Omit<Field, 'name' | 'type'> & { name: string; type: string }) => {
-    if (!onFieldsChange) return
-    onFieldsChange([...fields, newField])
+  const handleAddField = (newField: Field) => {
+    onChange([...fields, newField])
   }
 
   const handleUpdateField = (index: number, updates: Partial<Field>) => {
-    if (!onFieldsChange) return
     const updatedFields = [...fields]
     updatedFields[index] = { ...updatedFields[index], ...updates }
-    onFieldsChange(updatedFields)
+    onChange(updatedFields)
   }
 
   const handleRemoveField = (index: number) => {
-    if (!onFieldsChange) return
     const updatedFields = fields.filter((_, i) => i !== index)
-    onFieldsChange(updatedFields)
+    onChange(updatedFields)
   }
 
   return (
     <div>
-      {title && <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">{title}</h5>}
+      {title && depth === 0 && (
+        <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">{title}</h5>
+      )}
 
       <div className="space-y-2">
         {fields.length > 0 ? (
           <>
             {fields.map((field, idx) => (
-              <FieldRow
+              <FieldEditRow
                 key={idx}
                 field={field}
-                mode={mode}
                 onUpdate={(updates) => handleUpdateField(idx, updates)}
                 onRemove={() => handleRemoveField(idx)}
                 depth={depth}
                 maxDepth={maxDepth}
                 canNest={canNest}
                 context={context}
-                testValue={testValues[field.name]}
-                onTestValueChange={(value) => {
-                  if (onTestValuesChange) {
-                    onTestValuesChange({ ...testValues, [field.name]: value })
-                  }
-                }}
-                selectedEnv={selectedEnv}
+                readOnly={readOnly}
               />
             ))}
 
             {/* Add new field row */}
-            {isEditable && (
+            {!readOnly && (
               <AddFieldRow onAdd={handleAddField} canNest={canNest} context={context} />
             )}
           </>
         ) : (
           <>
-            {mode === 'view' ? (
-              <p className="text-sm text-gray-500 italic">{emptyMessage}</p>
+            {!readOnly ? (
+              <AddFieldRow onAdd={handleAddField} canNest={canNest} context={context} />
             ) : (
-              // Edit mode with no fields - just show the add row
-              isEditable && <AddFieldRow onAdd={handleAddField} canNest={canNest} context={context} />
+              <p className="text-sm text-gray-500 italic">{emptyMessage}</p>
             )}
           </>
         )}
@@ -166,174 +157,45 @@ export default function FieldEditor({
   )
 }
 
-interface FieldRowProps {
+interface FieldEditRowProps {
   field: Field
-  mode: 'view' | 'edit' | 'test'
-  onUpdate?: (updates: Partial<Field>) => void
-  onRemove?: () => void
-  depth?: number
-  maxDepth?: number
-  canNest?: boolean
-  context?: FieldContext
-  testValue?: any
-  onTestValueChange?: (value: any) => void
-  selectedEnv?: any
+  onUpdate: (updates: Partial<Field>) => void
+  onRemove: () => void
+  depth: number
+  maxDepth: number
+  canNest: boolean
+  context: FieldContext
+  readOnly: boolean
 }
 
-function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, canNest = true, context = 'body-json', testValue, onTestValueChange, selectedEnv }: FieldRowProps) {
+function FieldEditRow({
+  field,
+  onUpdate,
+  onRemove,
+  depth,
+  maxDepth,
+  canNest,
+  context,
+  readOnly,
+}: FieldEditRowProps) {
   const allowedTypes = getAllowedTypes(context)
   const allowedItemTypes = getAllowedItemTypes(context)
 
-  // Test mode - simple key-value input
-  if (mode === 'test') {
-    const value = testValue !== undefined ? testValue : (field.example || '')
-
-    if (field.type === 'file') {
-      // File upload: 2 columns - name, upload button + file path (no delete in test mode)
-      // testValue stores the file path string
-      const filePath = testValue || ''
-
-      return (
-        <div className="grid grid-cols-[200px_1fr] gap-2 items-center">
-          <div className="text-sm font-medium text-gray-700">
-            {field.name}
-            {field.required && <span className="text-red-500 ml-1">*</span>}
-          </div>
-          <div className="flex gap-2 items-center">
-            <label className="px-3 py-2 border border-gray-300 rounded-md text-sm text-center cursor-pointer hover:bg-gray-50 transition-colors whitespace-nowrap">
-              <File size={14} className="inline mr-1" />
-              Choose File
-              <input
-                type="file"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    // Store the file path (or name for web, full path for desktop)
-                    const path = (file as any).path || file.name
-                    onTestValueChange?.(path)
-                  }
-                }}
-                className="hidden"
-              />
-            </label>
-            <div className="text-sm text-gray-500 italic truncate flex-1" title={filePath}>
-              {filePath || 'No file chosen'}
-            </div>
-          </div>
-        </div>
-      )
-    }
-
-    // Regular input: 2 columns - name, value input (no delete in test mode)
-    return (
-      <div className="grid grid-cols-[200px_1fr] gap-2 items-center">
-        <div className="text-sm font-medium text-gray-700">
-          {field.name}
-          {field.required && <span className="text-red-500 ml-1">*</span>}
-        </div>
-        <VariableInput
-          value={value}
-          onChange={(newValue) => onTestValueChange?.(newValue)}
-          variables={{
-            ...(selectedEnv?.variables || {}),
-            ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
-          }}
-          placeholder={field.example || `Enter ${field.name}`}
-          className="text-sm"
-        />
-      </div>
-    )
-  }
-
-  if (mode === 'view') {
-    return (
-      <div className="p-3 bg-gray-50 rounded border border-gray-200">
-        <div className="flex items-center gap-2 mb-1">
-          <code className="text-sm font-mono text-gray-900">{field.name}</code>
-          <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-            {field.type}
-          </span>
-          {field.format && (
-            <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
-              {field.format}
-            </span>
-          )}
-          {field.required && (
-            <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">
-              required
-            </span>
-          )}
-          {field.type === 'file' && (
-            <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded flex items-center gap-1">
-              <Upload size={12} /> file upload
-            </span>
-          )}
-        </div>
-        {field.description && (
-          <p className="text-xs text-gray-600 mt-1">{field.description}</p>
-        )}
-        {/* Array item type info */}
-        {field.type === 'array' && field.items && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs font-medium text-gray-600">Items:</span>
-            <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">
-              {field.items.type}
-            </span>
-            {field.items.type === 'file' && (
-              <span className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded flex items-center gap-1">
-                <Upload size={12} /> multiple file upload
-              </span>
-            )}
-          </div>
-        )}
-        {field.example !== undefined && field.type !== 'file' && (
-          <div className="mt-2 text-xs">
-            <span className="font-medium text-gray-600">Example:</span>{' '}
-            <code className="text-purple-600">{JSON.stringify(field.example)}</code>
-          </div>
-        )}
-        {field.enum && field.enum.length > 0 && (
-          <div className="mt-2 text-xs">
-            <span className="font-medium text-gray-600">Allowed values:</span>{' '}
-            {field.enum.map((v, i) => (
-              <code key={i} className="text-purple-600 mr-1">{JSON.stringify(v)}</code>
-            ))}
-          </div>
-        )}
-        {/* Nested properties for object type */}
-        {field.type === 'object' && field.properties && field.properties.length > 0 && (
-          <div className="mt-3 ml-4 pl-4 border-l-2 border-gray-300">
-            <p className="text-xs font-semibold text-gray-600 mb-2">Properties:</p>
-            <div className="space-y-2">
-              {field.properties.map((prop, idx) => (
-                <FieldRow
-                  key={idx}
-                  field={prop}
-                  mode="view"
-                  depth={depth + 1}
-                  maxDepth={maxDepth}
-                  canNest={depth + 1 < maxDepth}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Edit mode
   return (
     <div className="bg-gray-50 rounded border border-gray-200">
       <div className="p-3">
         <div className="flex items-start gap-2">
+          {/* Name input */}
           <input
             type="text"
             value={field.name}
-            onChange={(e) => onUpdate?.({ name: e.target.value })}
+            onChange={(e) => onUpdate({ name: e.target.value })}
+            disabled={readOnly}
             className="w-32 text-sm font-mono text-gray-900 border border-gray-300 rounded px-2 py-1.5"
             placeholder="key"
           />
+
+          {/* Type selector */}
           <select
             value={field.type}
             onChange={(e) => {
@@ -351,8 +213,9 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
               if (newType === 'file') {
                 updates.format = 'binary'
               }
-              onUpdate?.(updates)
+              onUpdate(updates)
             }}
+            disabled={readOnly}
             className="w-24 text-xs px-2 py-1.5 bg-blue-100 text-blue-700 rounded border border-blue-300"
           >
             {allowedTypes.includes('string') && <option value="string">string</option>}
@@ -367,27 +230,37 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
             )}
             {allowedTypes.includes('file') && <option value="file">file</option>}
           </select>
+
+          {/* Required checkbox */}
           <input
             type="checkbox"
             checked={field.required || false}
-            onChange={(e) => onUpdate?.({ required: e.target.checked })}
+            onChange={(e) => onUpdate({ required: e.target.checked })}
+            disabled={readOnly}
             className="mt-2 rounded"
             title="Required"
           />
+
+          {/* Description input */}
           <input
             type="text"
             value={field.description || ''}
-            onChange={(e) => onUpdate?.({ description: e.target.value })}
+            onChange={(e) => onUpdate({ description: e.target.value })}
+            disabled={readOnly}
             className="flex-1 text-sm text-gray-600 border border-gray-300 rounded px-2 py-1.5"
             placeholder="Description"
           />
-          <button
-            onClick={onRemove}
-            className="p-1.5 text-red-600 hover:bg-red-50 rounded flex-shrink-0"
-            title="Remove field"
-          >
-            <X size={16} />
-          </button>
+
+          {/* Remove button */}
+          {!readOnly && (
+            <button
+              onClick={onRemove}
+              className="p-1.5 text-red-600 hover:bg-red-50 rounded flex-shrink-0"
+              title="Remove field"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         {/* Array item type selector */}
@@ -404,8 +277,9 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
                     ...(itemType === 'file' && { format: 'binary' })
                   }
                 }
-                onUpdate?.(updates)
+                onUpdate(updates)
               }}
+              disabled={readOnly}
               className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded border border-green-300"
             >
               {allowedItemTypes.includes('string') && <option value="string">string</option>}
@@ -437,14 +311,15 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
       {/* Nested properties editor for object type */}
       {field.type === 'object' && (
         <div className="ml-4 pl-4 border-l-2 border-gray-300 pb-3 pr-3">
-          <FieldEditor
+          <SchemaEditor
             fields={field.properties || []}
-            onFieldsChange={(newProps) => onUpdate?.({ properties: newProps })}
-            mode="edit"
+            onChange={(newProps) => onUpdate({ properties: newProps })}
             title="Properties"
             emptyMessage="No properties"
             depth={depth + 1}
             maxDepth={maxDepth}
+            context={context}
+            readOnly={readOnly}
           />
         </div>
       )}
@@ -454,18 +329,19 @@ function FieldRow({ field, mode, onUpdate, onRemove, depth = 0, maxDepth = 4, ca
 
 interface AddFieldRowProps {
   onAdd: (field: Field) => void
-  canNest?: boolean
-  context?: FieldContext
+  canNest: boolean
+  context: FieldContext
 }
 
-function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldRowProps) {
+function AddFieldRow({ onAdd, canNest, context }: AddFieldRowProps) {
   const allowedTypes = getAllowedTypes(context)
   const allowedItemTypes = getAllowedItemTypes(context)
-  const [name, setName] = React.useState('')
-  const [type, setType] = React.useState('string')
-  const [required, setRequired] = React.useState(false)
-  const [description, setDescription] = React.useState('')
-  const [arrayItemType, setArrayItemType] = React.useState('string')
+
+  const [name, setName] = useState('')
+  const [type, setType] = useState('string')
+  const [required, setRequired] = useState(false)
+  const [description, setDescription] = useState('')
+  const [arrayItemType, setArrayItemType] = useState('string')
 
   const handleAdd = () => {
     if (!name) return
@@ -508,6 +384,7 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
   return (
     <div className="p-3 bg-blue-50 border-2 border-dashed border-blue-200 rounded">
       <div className="flex items-start gap-2">
+        {/* Name input */}
         <input
           type="text"
           value={name}
@@ -515,6 +392,8 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
           className="w-32 text-sm font-mono border border-gray-300 rounded px-2 py-1.5"
           placeholder="key"
         />
+
+        {/* Type selector */}
         <select
           value={type}
           onChange={(e) => setType(e.target.value)}
@@ -532,6 +411,8 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
           )}
           {allowedTypes.includes('file') && <option value="file">file</option>}
         </select>
+
+        {/* Array item type selector (conditional) */}
         {type === 'array' && (
           <select
             value={arrayItemType}
@@ -547,6 +428,8 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
             {allowedItemTypes.includes('file') && <option value="file">file</option>}
           </select>
         )}
+
+        {/* Required checkbox */}
         <input
           type="checkbox"
           checked={required}
@@ -554,6 +437,8 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
           className="mt-2 rounded"
           title="Required"
         />
+
+        {/* Description input */}
         <input
           type="text"
           value={description}
@@ -561,6 +446,8 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
           className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5"
           placeholder="Description (optional)"
         />
+
+        {/* Add button */}
         <button
           onClick={handleAdd}
           disabled={!name}
@@ -573,6 +460,3 @@ function AddFieldRow({ onAdd, canNest = true, context = 'body-json' }: AddFieldR
     </div>
   )
 }
-
-// Need to import React for useState hook
-import React from 'react'

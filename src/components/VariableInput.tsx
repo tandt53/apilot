@@ -8,6 +8,7 @@ interface VariableInputProps {
   placeholder?: string
   disabled?: boolean
   className?: string
+  containerClassName?: string
   multiline?: boolean
   rows?: number
 }
@@ -30,6 +31,7 @@ export default function VariableInput({
   placeholder = '',
   disabled = false,
   className = '',
+  containerClassName = '',
   multiline = false,
   rows = 1
 }: VariableInputProps) {
@@ -37,11 +39,30 @@ export default function VariableInput({
   const [tooltip, setTooltip] = useState<TooltipState>({ show: false, text: '', x: 0, y: 0 })
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const tooltipLayerRef = useRef<HTMLDivElement>(null)
 
   // Hide tooltip when value changes (user is typing/deleting)
   useEffect(() => {
     setTooltip({ show: false, text: '', x: 0, y: 0 })
   }, [value])
+
+  // Sync scroll position of overlays with textarea (for multiline mode)
+  const handleScroll = () => {
+    if (multiline && inputRef.current) {
+      const scrollTop = (inputRef.current as HTMLTextAreaElement).scrollTop
+      const scrollLeft = (inputRef.current as HTMLTextAreaElement).scrollLeft
+
+      if (highlightRef.current) {
+        highlightRef.current.scrollTop = scrollTop
+        highlightRef.current.scrollLeft = scrollLeft
+      }
+      if (tooltipLayerRef.current) {
+        tooltipLayerRef.current.scrollTop = scrollTop
+        tooltipLayerRef.current.scrollLeft = scrollLeft
+      }
+    }
+  }
 
   // Parse text and highlight variables
   const renderHighlightedText = () => {
@@ -91,7 +112,7 @@ export default function VariableInput({
           }
 
           // Variable part - highlighted with colored background
-          const tooltipText = part.resolved ? `${part.varName}: ${variables[part.varName!]}` : 'Undefined variable'
+          const tooltipText = part.resolved ? variables[part.varName!] : 'Undefined variable'
 
           return (
             <span
@@ -155,7 +176,7 @@ export default function VariableInput({
   const renderTooltipLayer = () => {
     if (!value) return null
 
-    const parts: Array<{ type: 'text' | 'variable'; content: string; varName?: string; resolved?: boolean }> = []
+    const parts: Array<{ type: 'text' | 'variable'; content: string; varName?: string; resolved?: boolean; start?: number; end?: number }> = []
     let lastIndex = 0
     const regex = /\{\{([^}]+)\}\}/g
     let match
@@ -175,6 +196,8 @@ export default function VariableInput({
         content: match[0],
         varName,
         resolved,
+        start: match.index,
+        end: match.index + match[0].length,
       })
 
       lastIndex = match.index + match[0].length
@@ -194,7 +217,7 @@ export default function VariableInput({
             return <span key={idx} style={{ color: 'transparent' }}>{part.content}</span>
           }
 
-          const tooltipText = part.resolved ? `${part.varName}: ${variables[part.varName!]}` : 'Undefined variable'
+          const tooltipText = part.resolved ? variables[part.varName!] : 'Undefined variable'
 
           return (
             <span
@@ -209,6 +232,15 @@ export default function VariableInput({
               onClick={() => {
                 inputRef.current?.focus()
               }}
+              onDoubleClick={() => {
+                // Select the variable text in the textarea
+                if (inputRef.current && part.start !== undefined && part.end !== undefined) {
+                  inputRef.current.focus()
+                  if ('setSelectionRange' in inputRef.current) {
+                    inputRef.current.setSelectionRange(part.start, part.end)
+                  }
+                }
+              }}
               onMouseEnter={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect()
                 setTooltip({
@@ -220,6 +252,15 @@ export default function VariableInput({
               }}
               onMouseLeave={() => {
                 setTooltip({ show: false, text: '', x: 0, y: 0 })
+              }}
+              onWheel={(e) => {
+                // Forward wheel events to textarea for scrolling in multiline mode
+                if (multiline && inputRef.current) {
+                  const textarea = inputRef.current as HTMLTextAreaElement
+                  textarea.scrollTop += e.deltaY
+                  textarea.scrollLeft += e.deltaX
+                  e.preventDefault()
+                }
               }}
             >
               {part.content}
@@ -233,16 +274,21 @@ export default function VariableInput({
   return (
     <>
       {tooltipPortal}
-      <div className="relative" ref={containerRef}>
+      <div className={`relative ${containerClassName}`} ref={containerRef}>
 
       {/* Highlighted overlay - behind input, shows text with highlights */}
       {hasVariables && (
         <div
-          className={`absolute inset-0 overflow-hidden border border-gray-300 rounded px-3 py-2 text-sm font-mono bg-white`}
+          ref={highlightRef}
+          className={`absolute overflow-hidden border border-transparent rounded px-3 py-2 text-sm font-mono [&::-webkit-scrollbar]:hidden`}
           style={{
             zIndex: 0,
             pointerEvents: 'none',
             lineHeight: '1.5',
+            scrollbarWidth: 'none', // Firefox
+            msOverflowStyle: 'none', // IE/Edge
+            inset: 0,
+            boxSizing: 'border-box',
           }}
         >
           {renderHighlightedText()}
@@ -257,6 +303,7 @@ export default function VariableInput({
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
+          onScroll={handleScroll}
           disabled={disabled}
           placeholder={placeholder}
           rows={rows}
@@ -299,11 +346,16 @@ export default function VariableInput({
       {/* Tooltip interaction layer - on top, transparent, only for hover events */}
       {hasVariables && (
         <div
-          className={`absolute inset-0 overflow-hidden rounded px-3 py-2 text-sm font-mono`}
+          ref={tooltipLayerRef}
+          className={`absolute overflow-hidden border border-transparent rounded px-3 py-2 text-sm font-mono [&::-webkit-scrollbar]:hidden`}
           style={{
             zIndex: 2,
             pointerEvents: 'none',
             lineHeight: '1.5',
+            scrollbarWidth: 'none', // Firefox
+            msOverflowStyle: 'none', // IE/Edge
+            inset: 0,
+            boxSizing: 'border-box',
           }}
         >
           {renderTooltipLayer()}

@@ -1,6 +1,8 @@
 import {Plus, X} from 'lucide-react'
 import {useState} from 'react'
-import FieldEditor, {Field} from './FieldEditor'
+import SchemaViewer from './SchemaViewer'
+import SchemaEditor from './SchemaEditor'
+import type {Field} from './SchemaEditor'
 
 interface ResponseSpec {
   status?: string | number
@@ -237,13 +239,21 @@ export default function ResponseSpecificationEditor({
                   )}
 
                   {/* Fields */}
-                  <FieldEditor
-                    fields={response.fields || []}
-                    onFieldsChange={isEditable ? (fields) => handleUpdateResponse(response.id, { fields }) : undefined}
-                    mode={mode}
-                    title="Fields"
-                    emptyMessage="No fields defined"
-                  />
+                  {mode === 'view' ? (
+                    <SchemaViewer
+                      fields={response.fields || []}
+                      title="Fields"
+                      emptyMessage="No fields defined"
+                    />
+                  ) : (
+                    <SchemaEditor
+                      fields={response.fields || []}
+                      onChange={(fields) => handleUpdateResponse(response.id, { fields })}
+                      title="Fields"
+                      emptyMessage="No fields defined"
+                      context="body-json"
+                    />
+                  )}
                 </>
               )
             }
@@ -301,13 +311,21 @@ export default function ResponseSpecificationEditor({
                   </div>
                 )}
 
-                <FieldEditor
-                  fields={response.fields || []}
-                  onFieldsChange={isEditable ? (fields) => handleUpdateResponse(response.id, { fields }) : undefined}
-                  mode={mode}
-                  title="Fields"
-                  emptyMessage="No fields defined"
-                />
+                {mode === 'view' ? (
+                  <SchemaViewer
+                    fields={response.fields || []}
+                    title="Fields"
+                    emptyMessage="No fields defined"
+                  />
+                ) : (
+                  <SchemaEditor
+                    fields={response.fields || []}
+                    onChange={(fields) => handleUpdateResponse(response.id, { fields })}
+                    title="Fields"
+                    emptyMessage="No fields defined"
+                    context="body-json"
+                  />
+                )}
               </>
             )
           })()}

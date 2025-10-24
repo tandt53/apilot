@@ -552,16 +552,32 @@ export const TEST_CONNECTION_PROMPT = `Say 'Hello! I'm ready to help you generat
 export function formatEndpointsForPrompt(endpoints: any[]): string {
   // Endpoints are already in canonical format from the database
   // Just extract the fields AI needs (no conversion required!)
-  const formatted = endpoints.map(endpoint => ({
-    method: endpoint.method,
-    path: endpoint.path,
-    name: endpoint.name,
-    description: endpoint.description,
-    tags: endpoint.tags,
-    request: endpoint.request,
-    responses: endpoint.responses,
-    auth: endpoint.auth,
-  }))
+  const formatted = endpoints.map(endpoint => {
+    // Filter out 5xx errors from responses.errors array
+    // These are unpredictable server failures that shouldn't be tested
+    const responses = endpoint.responses ? {
+      ...endpoint.responses,
+      errors: endpoint.responses.errors?.filter((error: any) => {
+        const status = parseInt(String(error.status), 10)
+        const is5xx = status >= 500 && status < 600
+        if (is5xx) {
+          console.log(`[Prompt Formatter] Filtering out 5xx error: ${status} from ${endpoint.method} ${endpoint.path}`)
+        }
+        return !is5xx
+      }) || []
+    } : endpoint.responses
+
+    return {
+      method: endpoint.method,
+      path: endpoint.path,
+      name: endpoint.name,
+      description: endpoint.description,
+      tags: endpoint.tags,
+      request: endpoint.request,
+      responses,
+      auth: endpoint.auth,
+    }
+  })
 
   const result = JSON.stringify(formatted, null, 2)
 
@@ -599,15 +615,30 @@ export function formatReferenceEndpointsForPrompt(referenceEndpoints: any[]): st
     return ''
   }
 
-  const formatted = referenceEndpoints.map(endpoint => ({
-    method: endpoint.method,
-    path: endpoint.path,
-    name: endpoint.name,
-    description: endpoint.description,
-    request: endpoint.request,
-    responses: endpoint.responses,
-    auth: endpoint.auth,
-  }))
+  const formatted = referenceEndpoints.map(endpoint => {
+    // Filter out 5xx errors from responses.errors array (same as target endpoints)
+    const responses = endpoint.responses ? {
+      ...endpoint.responses,
+      errors: endpoint.responses.errors?.filter((error: any) => {
+        const status = parseInt(String(error.status), 10)
+        const is5xx = status >= 500 && status < 600
+        if (is5xx) {
+          console.log(`[Prompt Formatter] Filtering out 5xx error: ${status} from reference ${endpoint.method} ${endpoint.path}`)
+        }
+        return !is5xx
+      }) || []
+    } : endpoint.responses
+
+    return {
+      method: endpoint.method,
+      path: endpoint.path,
+      name: endpoint.name,
+      description: endpoint.description,
+      request: endpoint.request,
+      responses,
+      auth: endpoint.auth,
+    }
+  })
 
   const result = JSON.stringify(formatted, null, 2)
 

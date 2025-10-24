@@ -457,7 +457,7 @@ async function executeHTTPRequest(
 /**
  * Validate assertions against response
  */
-function validateAssertions(
+export function validateAssertions(
   assertions: Assertion[],
   response: ExecutionResponse
 ): AssertionResult[] {

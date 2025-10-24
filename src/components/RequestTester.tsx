@@ -8,6 +8,8 @@ import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
 import {substituteBuiltInVariables} from '@/utils/variables'
 import {buildBodyFromSchema, bodyMatchesSchema} from '@/lib/utils/bodyHelpers'
+import {validateAssertions} from '@/lib/executor/testExecutor'
+import type {ExecutionResponse} from '@/types/database'
 
 interface Assertion {
     type: string
@@ -659,7 +661,20 @@ export default function RequestTester({
                 console.log('Data:', result.data)
                 console.groupEnd()
 
-                setResponse(result)
+                // Transform IPC response to ExecutionResponse format for assertion validation
+                const executionResponse: ExecutionResponse = {
+                    statusCode: result.status,
+                    statusText: result.statusText,
+                    headers: result.headers,
+                    body: result.data,
+                    responseTime: responseTime
+                }
+
+                // Evaluate assertions (cast local assertions to database type)
+                const assertionResults = validateAssertions(assertions as any, executionResponse)
+
+                // Add assertion results to response
+                setResponse({ ...result, assertionResults })
                 return
             }
 
@@ -710,7 +725,20 @@ export default function RequestTester({
             console.log('Data:', responseData)
             console.groupEnd()
 
-            setResponse(responseObj)
+            // Transform fetch response to ExecutionResponse format for assertion validation
+            const executionResponse: ExecutionResponse = {
+                statusCode: responseObj.status,
+                statusText: responseObj.statusText,
+                headers: responseObj.headers,
+                body: responseObj.data,
+                responseTime: endTime - startTime
+            }
+
+            // Evaluate assertions (cast local assertions to database type)
+            const assertionResults = validateAssertions(assertions as any, executionResponse)
+
+            // Add assertion results to response
+            setResponse({ ...responseObj, assertionResults })
 
             if (assertions.length > 0) {
                 // Normalize assertion type to handle both old and new formats
