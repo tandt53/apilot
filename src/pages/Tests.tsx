@@ -442,12 +442,8 @@ export default function Tests() {
 
   // Combine header changes with request changes
   useEffect(() => {
-    // Update hasUnsavedChanges based on both header and request changes
-    setHasUnsavedChanges((prevHasChanges) => {
-      // If there are header changes, we have unsaved changes
-      // Otherwise, respect the existing state from RequestTester
-      return hasHeaderChanges || prevHasChanges
-    })
+    // Update hasUnsavedChanges based on header changes (includes steps changes)
+    setHasUnsavedChanges(hasHeaderChanges)
   }, [hasHeaderChanges])
 
   // Get selected spec - memoized to prevent recalculation
@@ -455,6 +451,14 @@ export default function Tests() {
     () => testGroups?.find(g => g.spec.id === selectedSpecId)?.spec,
     [testGroups, selectedSpecId]
   )
+
+  // Check if selected spec has any tests
+  const selectedSpecHasTests = useMemo(() => {
+    if (!selectedSpecId || !testGroups) return false
+    const group = testGroups.find(g => g.spec.id === selectedSpecId)
+    if (!group) return false
+    return group.singleTests.length > 0 || group.workflowTests.length > 0
+  }, [selectedSpecId, testGroups])
 
   // Load environments for selected test's spec OR selected spec
   const { data: environments } = useEnvironments(selectedTest?.specId || selectedSpecId || 0)
@@ -563,6 +567,25 @@ export default function Tests() {
       setExpandedSpecs(prev => new Set(prev).add(selectedSpecId))
     }
   }, [selectedSpecId])
+
+  // Handle when selected spec is deleted
+  useEffect(() => {
+    if (selectedSpecId && testGroups) {
+      const specExists = testGroups.some(g => g.spec.id === selectedSpecId)
+      if (!specExists) {
+        // Spec was deleted
+        if (testGroups.length > 0) {
+          // Auto-select first available spec
+          setSelectedSpecId(testGroups[0].spec.id!)
+        } else {
+          // No specs left, clear selection
+          setSelectedSpecId(null)
+        }
+        // Also clear selected test
+        setSelectedTestId(null)
+      }
+    }
+  }, [selectedSpecId, testGroups])
 
   // Persist expanded specs
   useEffect(() => {
@@ -1421,7 +1444,7 @@ export default function Tests() {
 
         {/* Right Panel: Test Detail or Spec Detail */}
         <div className="flex-1 overflow-y-auto glass-card rounded-3xl">
-          {!selectedTest && !selectedSpec ? (
+          {!selectedTest && (!selectedSpec || !selectedSpecHasTests) ? (
             <div className="flex items-center justify-center h-full text-gray-500">
               <div className="text-center">
                 <FileText size={48} className="mx-auto mb-4 text-gray-400" />
@@ -1447,12 +1470,14 @@ export default function Tests() {
                     {(() => {
                       const group = testGroups?.find(g => g.spec.id === selectedSpecId)
                       const totalTests = (group?.singleTests.length || 0) + (group?.workflowTests.length || 0)
+                      const isGeneratingForThisSpec = isGenerating && generatingSpecId === selectedSpecId
 
                       return totalTests > 0 ? (
                         <Button
                           variant="danger"
                           size="sm"
                           icon={Trash2}
+                          disabled={isGeneratingForThisSpec}
                           onClick={async () => {
                             const confirmed = window.confirm(
                               `Delete all tests for "${selectedSpec.name}"?\n\nThis will delete ${totalTests} test(s) and their execution history. The spec itself will NOT be deleted.`
@@ -1467,7 +1492,7 @@ export default function Tests() {
                               }
                             }
                           }}
-                          title="Delete all tests for this spec"
+                          title={isGeneratingForThisSpec ? "Cannot delete while generating tests" : "Delete all tests for this spec"}
                         />
                       ) : null
                     })()}

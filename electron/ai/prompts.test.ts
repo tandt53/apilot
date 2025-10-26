@@ -167,6 +167,66 @@ describe('AI Prompt Formatters', () => {
       expect(result).toContain('"method"')
       expect(result).toContain('"path"')
     })
+
+    it('should filter out 5xx server errors from responses.errors', () => {
+      const endpoints = [
+        {
+          method: 'POST',
+          path: '/orders',
+          name: 'Create order',
+          description: 'Create a new order',
+          request: { contentType: 'application/json', parameters: [], body: null },
+          responses: {
+            success: { status: 201, fields: [] },
+            errors: [
+              { status: 400, reason: 'Bad Request' },
+              { status: 404, reason: 'Not Found' },
+              { status: 422, reason: 'Validation Error' },
+              { status: 500, reason: 'Internal Server Error' }, // Should be filtered
+              { status: 502, reason: 'Bad Gateway' }, // Should be filtered
+              { status: 503, reason: 'Service Unavailable' }, // Should be filtered
+            ],
+          },
+          auth: { required: false },
+        },
+      ]
+
+      const result = formatEndpointsForPrompt(endpoints)
+
+      // Should include 4xx errors
+      expect(result).toContain('400')
+      expect(result).toContain('404')
+      expect(result).toContain('422')
+
+      // Should NOT include 5xx errors
+      expect(result).not.toContain('500')
+      expect(result).not.toContain('502')
+      expect(result).not.toContain('503')
+      expect(result).not.toContain('Internal Server Error')
+      expect(result).not.toContain('Bad Gateway')
+      expect(result).not.toContain('Service Unavailable')
+    })
+
+    it('should handle endpoints with no responses.errors gracefully', () => {
+      const endpoints = [
+        {
+          method: 'GET',
+          path: '/test',
+          name: 'Test endpoint',
+          description: 'Test',
+          request: { contentType: 'application/json', parameters: [], body: null },
+          responses: {
+            success: { status: 200, fields: [] },
+          },
+          auth: { required: false },
+        },
+      ]
+
+      const result = formatEndpointsForPrompt(endpoints)
+
+      expect(result).toBeTruthy()
+      expect(result).toContain('"method": "GET"')
+    })
   })
 
   describe('formatSpecForPrompt - DEPRECATED (Backward Compatibility)', () => {
@@ -318,6 +378,40 @@ describe('AI Prompt Formatters', () => {
 
       expect(result1).toBe('')
       expect(result2).toBe('')
+    })
+
+    it('should filter out 5xx server errors from reference endpoints', () => {
+      const referenceEndpoints = [
+        {
+          method: 'POST',
+          path: '/users',
+          name: 'Create user',
+          description: 'Create new user',
+          request: { contentType: 'application/json', parameters: [], body: null },
+          responses: {
+            success: { status: 201, fields: [] },
+            errors: [
+              { status: 401, reason: 'Unauthorized' },
+              { status: 422, reason: 'Validation Error' },
+              { status: 500, reason: 'Internal Server Error' }, // Should be filtered
+              { status: 503, reason: 'Service Unavailable' }, // Should be filtered
+            ],
+          },
+          auth: { required: true },
+        },
+      ]
+
+      const result = formatReferenceEndpointsForPrompt(referenceEndpoints)
+
+      // Should include 4xx errors
+      expect(result).toContain('401')
+      expect(result).toContain('422')
+
+      // Should NOT include 5xx errors
+      expect(result).not.toContain('500')
+      expect(result).not.toContain('503')
+      expect(result).not.toContain('Internal Server Error')
+      expect(result).not.toContain('Service Unavailable')
     })
   })
 

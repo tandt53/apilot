@@ -386,9 +386,47 @@ Result: 5 validation tests for this field
 
 Generate comprehensive tests across ALL categories. Be thorough and generate as many applicable tests as possible.
 
+**CRITICAL GENERATION STRATEGY - MUST FOLLOW:**
+
+❌ **WRONG APPROACH (Do NOT do this):**
+- Generate 1-2 tests per endpoint and move on
+- Superficially cover all endpoints with minimal tests
+- Stop at "at least 1" per category
+
+✅ **CORRECT APPROACH (REQUIRED):**
+- **COMPLETE ONE ENDPOINT AT A TIME** - finish ALL applicable test categories before moving to next endpoint
+- **EXHAUSTIVE PER ENDPOINT** - generate 5-10+ tests per endpoint covering all categories thoroughly
+- **DEPTH OVER BREADTH** - it's better to fully test 2-3 endpoints than generate 1-2 tests for all endpoints
+- **Continue button exists** - if you hit token limit, user can click "Continue" to generate remaining endpoints
+
 ## PHASE 1: Single Endpoint Tests
 
-For EACH endpoint, systematically generate tests from ALL applicable categories:
+**MANDATORY SEQUENTIAL PROCESSING:**
+
+**Endpoint #1: Generate ALL tests**
+1. **Functional** - All happy path scenarios (1-2 tests)
+2. **Data Validation** - Test EVERY required field:
+   - Missing field test (1 test per required field)
+   - Wrong type test (1 test per required field)
+   - Invalid enum/format (if applicable)
+   - Min/max violations (if applicable)
+3. **Security** - Auth tests (if auth.required is true)
+4. **Data Integrity** - 404 test (if has path variables)
+5. **Query & Filter** - Pagination/filtering (if applicable)
+
+**Expected: 5-10+ tests for this endpoint**
+
+**Endpoint #2: Generate ALL tests**
+- Repeat all categories above for this endpoint
+**Expected: 5-10+ tests for this endpoint**
+
+**Endpoint #3: Generate ALL tests**
+- Repeat all categories above for this endpoint
+**Expected: 5-10+ tests for this endpoint**
+
+**Continue until token budget is exhausted**
+
+For EACH endpoint, the specific test categories are:
 
 1. **Functional** (always) → Happy path, CRUD operations
 2. **Security** (if auth required) → Missing/invalid auth, SQL injection (conditional for search/filter endpoints only)
@@ -409,13 +447,19 @@ Generate workflow tests for ALL discovered patterns.
 
 ## PHASE 3: Coverage Checklist
 
-Ensure you have generated:
+**MINIMUM REQUIREMENTS (per endpoint):**
 - At least 1 functional test per endpoint
 - At least 1 validation test per required field
 - At least 1 security test for protected endpoints
 - At least 1 data integrity test (404) for resource endpoints with IDs
 - At least 1 query/filter test for list endpoints with parameters
 - Workflow tests for all identified patterns
+
+**COMPREHENSIVE COVERAGE GOAL:**
+- Generate 3-5+ tests per endpoint across different categories
+- For each required field, test: missing field, wrong type, invalid format/enum, min/max violations
+- Don't stop at minimum - generate as many valid tests as applicable
+- With generous token budget (16K), prioritize thoroughness over brevity
 
 **Output ALL tests** - aim for comprehensive coverage across all 6 categories, focusing on business logic validation.
 
@@ -552,16 +596,32 @@ export const TEST_CONNECTION_PROMPT = `Say 'Hello! I'm ready to help you generat
 export function formatEndpointsForPrompt(endpoints: any[]): string {
   // Endpoints are already in canonical format from the database
   // Just extract the fields AI needs (no conversion required!)
-  const formatted = endpoints.map(endpoint => ({
-    method: endpoint.method,
-    path: endpoint.path,
-    name: endpoint.name,
-    description: endpoint.description,
-    tags: endpoint.tags,
-    request: endpoint.request,
-    responses: endpoint.responses,
-    auth: endpoint.auth,
-  }))
+  const formatted = endpoints.map(endpoint => {
+    // Filter out 5xx errors from responses.errors array
+    // These are unpredictable server failures that shouldn't be tested
+    const responses = endpoint.responses ? {
+      ...endpoint.responses,
+      errors: endpoint.responses.errors?.filter((error: any) => {
+        const status = parseInt(String(error.status), 10)
+        const is5xx = status >= 500 && status < 600
+        if (is5xx) {
+          console.log(`[Prompt Formatter] Filtering out 5xx error: ${status} from ${endpoint.method} ${endpoint.path}`)
+        }
+        return !is5xx
+      }) || []
+    } : endpoint.responses
+
+    return {
+      method: endpoint.method,
+      path: endpoint.path,
+      name: endpoint.name,
+      description: endpoint.description,
+      tags: endpoint.tags,
+      request: endpoint.request,
+      responses,
+      auth: endpoint.auth,
+    }
+  })
 
   const result = JSON.stringify(formatted, null, 2)
 
@@ -599,15 +659,30 @@ export function formatReferenceEndpointsForPrompt(referenceEndpoints: any[]): st
     return ''
   }
 
-  const formatted = referenceEndpoints.map(endpoint => ({
-    method: endpoint.method,
-    path: endpoint.path,
-    name: endpoint.name,
-    description: endpoint.description,
-    request: endpoint.request,
-    responses: endpoint.responses,
-    auth: endpoint.auth,
-  }))
+  const formatted = referenceEndpoints.map(endpoint => {
+    // Filter out 5xx errors from responses.errors array (same as target endpoints)
+    const responses = endpoint.responses ? {
+      ...endpoint.responses,
+      errors: endpoint.responses.errors?.filter((error: any) => {
+        const status = parseInt(String(error.status), 10)
+        const is5xx = status >= 500 && status < 600
+        if (is5xx) {
+          console.log(`[Prompt Formatter] Filtering out 5xx error: ${status} from reference ${endpoint.method} ${endpoint.path}`)
+        }
+        return !is5xx
+      }) || []
+    } : endpoint.responses
+
+    return {
+      method: endpoint.method,
+      path: endpoint.path,
+      name: endpoint.name,
+      description: endpoint.description,
+      request: endpoint.request,
+      responses,
+      auth: endpoint.auth,
+    }
+  })
 
   const result = JSON.stringify(formatted, null, 2)
 

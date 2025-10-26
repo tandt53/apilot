@@ -616,6 +616,72 @@ describe('applySmartDefaults', () => {
       const dateParam = enriched.request?.parameters?.find((p) => p.name === 'created')
       expect(dateParam?.format).toBe('date-time')
     })
+
+    it('should detect date-time format for created_at fields', () => {
+      const endpoint: CanonicalEndpoint = {
+        source: 'postman',
+        method: 'POST',
+        path: '/users',
+        name: 'Create User',
+        request: {
+          body: {
+            fields: [
+              {
+                name: 'created_at',
+                type: 'string',
+              },
+            ],
+          },
+        },
+        responses: {
+          success: { status: 201, description: 'Created' },
+          errors: [],
+        },
+      } as CanonicalEndpoint
+
+      const enriched = applySmartDefaults(endpoint)
+
+      const field = enriched.request?.body?.fields?.find((f) => f.name === 'created_at')
+      expect(field?.format).toBe('date-time')
+    })
+
+    it('should NOT detect date-time for fields containing "at" but not ending with "_at"', () => {
+      const endpoint: CanonicalEndpoint = {
+        source: 'postman',
+        method: 'POST',
+        path: '/quotes',
+        name: 'Create Quote',
+        request: {
+          body: {
+            fields: [
+              { name: 'destination_currency', type: 'string', example: 'SGD' },
+              { name: 'category', type: 'string', example: 'electronics' },
+              { name: 'status', type: 'string', example: 'active' },
+              { name: 'data', type: 'string', example: 'test' },
+            ],
+          },
+        },
+        responses: {
+          success: { status: 201, description: 'Created' },
+          errors: [],
+        },
+      } as CanonicalEndpoint
+
+      const enriched = applySmartDefaults(endpoint)
+
+      // None of these should have date-time format
+      const destCurrency = enriched.request?.body?.fields?.find((f) => f.name === 'destination_currency')
+      expect(destCurrency?.format).toBeUndefined()
+
+      const category = enriched.request?.body?.fields?.find((f) => f.name === 'category')
+      expect(category?.format).toBeUndefined()
+
+      const status = enriched.request?.body?.fields?.find((f) => f.name === 'status')
+      expect(status?.format).toBeUndefined()
+
+      const data = enriched.request?.body?.fields?.find((f) => f.name === 'data')
+      expect(data?.format).toBeUndefined()
+    })
   })
 })
 

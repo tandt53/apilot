@@ -1,7 +1,10 @@
 import {useState} from 'react'
 import {Minimize2, Maximize2} from 'lucide-react'
 import SchemaRenderer from './SchemaRenderer'
-import FieldEditor, {Field} from './FieldEditor'
+import SchemaViewer, {Field} from './SchemaViewer'
+import SchemaEditor from './SchemaEditor'
+import KeyValueEditor from './KeyValueEditor'
+import VariableInput from './VariableInput'
 
 interface RequestSpecificationTabsProps {
   endpoint: any
@@ -125,33 +128,36 @@ export default function RequestSpecificationTabs({
           <div>
             {mode === 'view' ? (
               // View mode - show spec parameters
-              <FieldEditor
+              <SchemaViewer
                 fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []}
-                mode="view"
                 title="Query Parameters"
                 emptyMessage="No query parameters"
               />
             ) : mode === 'test' ? (
-              // Test mode - simple key-value input using FieldEditor
-              <FieldEditor
-                fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'query') || []}
-                mode="test"
+              // Test mode - custom entries only (full freedom to add/edit/remove)
+              <KeyValueEditor
+                entries={Object.entries(params || {}).map(([key, value]) => ({ key, value }))}
+                onChange={(entries) => {
+                  const paramsObj = Object.fromEntries(entries.map(e => [e.key, e.value]))
+                  onParamsChange?.(paramsObj)
+                }}
                 title="Query Parameters"
                 emptyMessage="No query parameters"
-                testValues={params}
-                onTestValuesChange={onParamsChange}
+                keyPlaceholder="Parameter name"
+                valuePlaceholder="Value"
+                addButtonLabel="Add Parameter"
+                allowVariables={true}
                 selectedEnv={selectedEnv}
               />
             ) : (
-              // Edit mode - editable params using FieldEditor
-              <FieldEditor
+              // Edit mode - editable params schema
+              <SchemaEditor
                 fields={queryParams}
-                onFieldsChange={(fields) => {
+                onChange={(fields) => {
                   // Ensure all fields have in: 'query'
                   const fieldsWithIn = fields.map(f => ({ ...f, in: 'query' }))
                   onQueryParamsChange?.(fieldsWithIn)
                 }}
-                mode="edit"
                 title="Query Parameters"
                 emptyMessage="No parameters defined"
                 context="params"
@@ -177,9 +183,8 @@ export default function RequestSpecificationTabs({
 
                 {/* Header Parameters */}
                 {endpoint.request.parameters?.filter((p: any) => p.in === 'header').length > 0 ? (
-                  <FieldEditor
+                  <SchemaViewer
                     fields={endpoint.request.parameters.filter((p: any) => p.in === 'header')}
-                    mode="view"
                     title="Headers"
                     emptyMessage="No headers"
                   />
@@ -188,7 +193,7 @@ export default function RequestSpecificationTabs({
                 )}
               </div>
             ) : mode === 'test' ? (
-              // Test mode - simple key-value input using FieldEditor
+              // Test mode - custom entries only (full freedom to add/edit/remove)
               <div className="space-y-4">
                 {/* Content-Type Display (Read-only in test mode) */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -199,14 +204,19 @@ export default function RequestSpecificationTabs({
                   <p className="text-xs text-gray-500 mt-1">💡 Change Content-Type in the Body tab</p>
                 </div>
 
-                {/* Headers using FieldEditor */}
-                <FieldEditor
-                  fields={endpoint.request?.parameters?.filter((p: any) => p.in === 'header') || []}
-                  mode="test"
+                {/* Headers - custom entries only */}
+                <KeyValueEditor
+                  entries={Object.entries(headers || {}).map(([key, value]) => ({ key, value }))}
+                  onChange={(entries) => {
+                    const headersObj = Object.fromEntries(entries.map(e => [e.key, e.value]))
+                    onHeadersChange?.(headersObj)
+                  }}
                   title="Headers"
                   emptyMessage="No headers"
-                  testValues={headers}
-                  onTestValuesChange={onHeadersChange}
+                  keyPlaceholder="Header name"
+                  valuePlaceholder="Value"
+                  addButtonLabel="Add Header"
+                  allowVariables={true}
                   selectedEnv={selectedEnv}
                 />
               </div>
@@ -222,15 +232,14 @@ export default function RequestSpecificationTabs({
                   <p className="text-xs text-gray-500 mt-1">💡 Change Content-Type in the Body tab</p>
                 </div>
 
-                {/* Editable headers using FieldEditor */}
-                <FieldEditor
+                {/* Editable headers schema */}
+                <SchemaEditor
                   fields={headerParams}
-                  onFieldsChange={(fields) => {
+                  onChange={(fields) => {
                     // Ensure all fields have in: 'header'
-                    const fieldsWithIn = fields.map(f => ({ ...f, in: 'header' }))
+                    const fieldsWithIn = fields.map((f: Field) => ({ ...f, in: 'header' }))
                     onHeaderParamsChange?.(fieldsWithIn)
                   }}
-                  mode="edit"
                   title="Custom Headers"
                   emptyMessage="No custom headers defined"
                   context="headers"
@@ -262,9 +271,8 @@ export default function RequestSpecificationTabs({
                     </div>
                   )}
                   {endpoint.request.body.fields && endpoint.request.body.fields.length > 0 && (
-                    <FieldEditor
+                    <SchemaViewer
                       fields={endpoint.request.body.fields}
-                      mode="view"
                       title="Fields"
                       emptyMessage="No fields defined"
                     />
@@ -288,14 +296,20 @@ export default function RequestSpecificationTabs({
                 </div>
 
                 {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
-                  // Form data / URL-encoded - Use FieldEditor
-                  <FieldEditor
-                    fields={endpoint.request?.body?.fields || []}
-                    mode="test"
+                  // Form data / URL-encoded - custom entries only (full freedom)
+                  <KeyValueEditor
+                    entries={Object.entries(formData || {}).map(([key, value]) => ({ key, value }))}
+                    onChange={(entries) => {
+                      const formObj = Object.fromEntries(entries.map(e => [e.key, e.value]))
+                      onFormDataChange?.(formObj)
+                    }}
                     title={contentType.includes('multipart/form-data') ? 'Form Data' : 'URL-Encoded Data'}
                     emptyMessage="No body fields defined"
-                    testValues={formData}
-                    onTestValuesChange={onFormDataChange}
+                    keyPlaceholder="Field name"
+                    valuePlaceholder="Value"
+                    addButtonLabel="Add Field"
+                    allowVariables={true}
+                    allowFileUpload={contentType.includes('multipart/form-data')}
                     selectedEnv={selectedEnv}
                   />
                 ) : endpoint.request?.body ? (
@@ -339,11 +353,17 @@ export default function RequestSpecificationTabs({
                         </button>
                       </div>
                     </div>
-                    <textarea
+                    <VariableInput
                       value={body}
-                      onChange={(e) => onBodyChange?.(e.target.value)}
+                      onChange={(value) => onBodyChange?.(value)}
+                      variables={{
+                        ...(selectedEnv?.variables || {}),
+                        ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {})
+                      }}
                       placeholder={endpoint.request.body.example ? JSON.stringify(endpoint.request.body.example, null, 2) : '{\n  \n}'}
-                      className="w-full h-64 p-3 font-mono text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 bg-gray-50"
+                      multiline={true}
+                      rows={10}
+                      className="bg-gray-50"
                     />
                   </div>
                 ) : (
@@ -352,7 +372,7 @@ export default function RequestSpecificationTabs({
                 )}
               </div>
             ) : (
-              // Edit mode - Use FieldEditor for editing structure
+              // Edit mode - Use SchemaEditor for editing structure
               <div>
                 {/* Content-Type Selector */}
                 <div className="mb-4">
@@ -385,24 +405,22 @@ export default function RequestSpecificationTabs({
                   </p>
                 </div>
                 {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
-                  // Form data / URL-encoded fields - Use FieldEditor
+                  // Form data / URL-encoded fields - schema editor
                   <div>
-                    <FieldEditor
+                    <SchemaEditor
                       fields={bodyFields}
-                      onFieldsChange={onBodyFieldsChange}
-                      mode={mode}
+                      onChange={onBodyFieldsChange || (() => {})}
                       title={contentType.includes('multipart/form-data') ? 'Form Data Fields' : 'URL-Encoded Fields'}
                       emptyMessage="No body fields defined"
                       context={contentType.includes('multipart/form-data') ? 'body-form' : 'body-urlencoded'}
                     />
                   </div>
                 ) : (
-                  // JSON body - Use FieldEditor for editing structure
+                  // JSON body - schema editor for structure
                   <div>
-                    <FieldEditor
+                    <SchemaEditor
                       fields={bodyFields}
-                      onFieldsChange={onBodyFieldsChange}
-                      mode={mode}
+                      onChange={onBodyFieldsChange || (() => {})}
                       title="Body Fields"
                       emptyMessage="No body fields defined"
                       context="body-json"

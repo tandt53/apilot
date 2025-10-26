@@ -6,25 +6,46 @@
 /**
  * Replace variables in a string value
  * Supports nested variables like {{baseUrl}}/users/{{userId}}
+ * Detects cyclic references and throws an error
  */
 export function replaceVariables(
   value: string,
   variables: Record<string, string> = {},
-  options: { keepUnresolved?: boolean } = {}
+  options: { keepUnresolved?: boolean; _resolving?: Set<string> } = {}
 ): string {
   if (!value || typeof value !== 'string') {
     return value
   }
 
-  const { keepUnresolved = true } = options
+  const { keepUnresolved = true, _resolving = new Set() } = options
 
   // Replace all {{variableName}} patterns
   return value.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
     const trimmedName = varName.trim()
 
+    // Detect cyclic references
+    if (_resolving.has(trimmedName)) {
+      throw new Error(`Cyclic variable reference detected: ${trimmedName}`)
+    }
+
     // Check if variable exists
     if (trimmedName in variables) {
-      return String(variables[trimmedName])
+      const varValue = variables[trimmedName]
+
+      // If value contains variables, recursively resolve with cycle tracking
+      if (hasVariables(varValue)) {
+        // Add to resolving set to detect cycles
+        const newResolving = new Set(_resolving)
+        newResolving.add(trimmedName)
+
+        const resolved = replaceVariables(varValue, variables, {
+          keepUnresolved,
+          _resolving: newResolving
+        })
+        return resolved
+      }
+
+      return String(varValue)
     }
 
     // If variable not found, either keep placeholder or remove it

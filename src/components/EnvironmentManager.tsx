@@ -1,8 +1,10 @@
 import {useEffect, useState} from 'react'
-import {Download, Plus, Trash2, Upload, X} from 'lucide-react'
+import {Download, Plus, Trash2, Upload} from 'lucide-react'
 import * as api from '@/lib/api'
 import {useCreateEnvironment, useDeleteEnvironment, useUpdateEnvironment} from '@/lib/hooks'
 import type {Environment} from '@/types/database'
+import KeyValueEditor from './KeyValueEditor'
+import {validateVariables, formatValidationErrors} from '@/lib/utils/validateVariables'
 
 interface EnvironmentManagerProps {
   specId: number
@@ -88,6 +90,13 @@ export default function EnvironmentManager({
       return
     }
 
+    // Validate variables for cyclic references
+    const validation = validateVariables(envForm.variables)
+    if (!validation.valid) {
+      alert(`Cannot save environment:\n\n${formatValidationErrors(validation)}`)
+      return
+    }
+
     const newEnv = await createEnvironment.mutateAsync({
       specId,
       name: envForm.name,
@@ -104,6 +113,13 @@ export default function EnvironmentManager({
   const handleUpdateEnv = async () => {
     if (!editingEnv || !envForm.name || !envForm.baseUrl) {
       alert('Name and Base URL are required')
+      return
+    }
+
+    // Validate variables for cyclic references
+    const validation = validateVariables(envForm.variables)
+    if (!validation.valid) {
+      alert(`Cannot save environment:\n\n${formatValidationErrors(validation)}`)
       return
     }
 
@@ -266,59 +282,19 @@ export default function EnvironmentManager({
             <label className={`block text-sm font-medium text-gray-700 ${compact ? 'mb-1.5 text-xs' : 'mb-2'}`}>
               Variables (use as {`{{variableName}}`} in requests)
             </label>
-            <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
-              {Object.entries(envForm.variables).map(([key, value], index) => (
-                <div key={index} className={compact ? 'flex gap-1.5' : 'flex gap-2'}>
-                  <input
-                    type="text"
-                    value={key}
-                    onChange={(e) => {
-                      const newVars = { ...envForm.variables }
-                      delete newVars[key]
-                      newVars[e.target.value] = value
-                      setEnvForm({ ...envForm, variables: newVars })
-                    }}
-                    placeholder="Variable name"
-                    className={`flex-1 border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
-                  />
-                  <input
-                    type="text"
-                    value={value}
-                    onChange={(e) => {
-                      setEnvForm({
-                        ...envForm,
-                        variables: { ...envForm.variables, [key]: e.target.value }
-                      })
-                    }}
-                    placeholder="Value"
-                    className={`flex-1 border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
-                  />
-                  <button
-                    onClick={() => {
-                      const newVars = { ...envForm.variables }
-                      delete newVars[key]
-                      setEnvForm({ ...envForm, variables: newVars })
-                    }}
-                    className={compact ? 'p-1 text-gray-400 hover:text-red-600 rounded' : 'p-2 text-gray-400 hover:text-red-600 rounded'}
-                  >
-                    <X size={compact ? 14 : 16} />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  const newKey = `var${Object.keys(envForm.variables).length + 1}`
-                  setEnvForm({
-                    ...envForm,
-                    variables: { ...envForm.variables, [newKey]: '' }
-                  })
-                }}
-                className={`flex items-center gap-1 text-purple-600 hover:text-purple-700 ${compact ? 'text-xs' : 'text-sm'}`}
-              >
-                <Plus size={compact ? 12 : 14} />
-                Add Variable
-              </button>
-            </div>
+            <KeyValueEditor
+              entries={Object.entries(envForm.variables).map(([key, value]) => ({ key, value }))}
+              onChange={(entries) => {
+                const variables = Object.fromEntries(entries.map(e => [e.key, e.value]))
+                setEnvForm({ ...envForm, variables })
+              }}
+              keyPlaceholder="Variable name"
+              valuePlaceholder="Value"
+              addButtonLabel="Add Variable"
+              emptyMessage="No variables defined"
+              allowVariables={true}
+              selectedEnv={{ variables: envForm.variables, baseUrl: envForm.baseUrl, headers: envForm.headers }}
+            />
           </div>
 
           {/* Headers */}
@@ -326,59 +302,19 @@ export default function EnvironmentManager({
             <label className={`block text-sm font-medium text-gray-700 ${compact ? 'mb-1.5 text-xs' : 'mb-2'}`}>
               Headers (automatically added to all requests)
             </label>
-            <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
-              {Object.entries(envForm.headers).map(([key, value], index) => (
-                <div key={index} className={compact ? 'flex gap-1.5' : 'flex gap-2'}>
-                  <input
-                    type="text"
-                    value={key}
-                    onChange={(e) => {
-                      const newHeaders = { ...envForm.headers }
-                      delete newHeaders[key]
-                      newHeaders[e.target.value] = value
-                      setEnvForm({ ...envForm, headers: newHeaders })
-                    }}
-                    placeholder="Header name"
-                    className={`flex-1 border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
-                  />
-                  <input
-                    type="text"
-                    value={value}
-                    onChange={(e) => {
-                      setEnvForm({
-                        ...envForm,
-                        headers: { ...envForm.headers, [key]: e.target.value }
-                      })
-                    }}
-                    placeholder="Value"
-                    className={`flex-1 border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
-                  />
-                  <button
-                    onClick={() => {
-                      const newHeaders = { ...envForm.headers }
-                      delete newHeaders[key]
-                      setEnvForm({ ...envForm, headers: newHeaders })
-                    }}
-                    className={compact ? 'p-1 text-gray-400 hover:text-red-600 rounded' : 'p-2 text-gray-400 hover:text-red-600 rounded'}
-                  >
-                    <X size={compact ? 14 : 16} />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  const newKey = 'X-Custom-Header'
-                  setEnvForm({
-                    ...envForm,
-                    headers: { ...envForm.headers, [newKey]: '' }
-                  })
-                }}
-                className={`flex items-center gap-1 text-purple-600 hover:text-purple-700 ${compact ? 'text-xs' : 'text-sm'}`}
-              >
-                <Plus size={compact ? 12 : 14} />
-                Add Header
-              </button>
-            </div>
+            <KeyValueEditor
+              entries={Object.entries(envForm.headers).map(([key, value]) => ({ key, value }))}
+              onChange={(entries) => {
+                const headers = Object.fromEntries(entries.map(e => [e.key, e.value]))
+                setEnvForm({ ...envForm, headers })
+              }}
+              keyPlaceholder="Header name"
+              valuePlaceholder="Value"
+              addButtonLabel="Add Header"
+              emptyMessage="No headers defined"
+              allowVariables={true}
+              selectedEnv={selectedEnv}
+            />
           </div>
 
           {/* Form Actions */}

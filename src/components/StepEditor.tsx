@@ -3,7 +3,7 @@
  * Manage multiple test steps with expandable card layout
  */
 
-import {useState} from 'react'
+import {useState, useRef, useCallback} from 'react'
 import {ChevronUp, ChevronDown, ChevronRight, Trash2} from 'lucide-react'
 import type {TestStep, Environment} from '@/types/database'
 import RequestTester from './RequestTester'
@@ -30,6 +30,18 @@ export default function StepEditor({
   specId
 }: StepEditorProps) {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+
+  // Debounce save to prevent rapid re-renders
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const debouncedSave = useCallback((saveHandler: () => Promise<void>) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+    }
+    saveTimerRef.current = setTimeout(() => {
+      saveHandler()
+      saveTimerRef.current = null
+    }, 300)
+  }, [])
 
   const toggleStep = (stepId: string) => {
     setExpandedSteps(prev => {
@@ -145,13 +157,8 @@ export default function StepEditor({
                   </div>
                 </div>
 
-                {/* Badges for variables and assertions */}
+                {/* Badges for assertions */}
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {step.extractVariables && step.extractVariables.length > 0 && (
-                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                      📤 {step.extractVariables.length}
-                    </span>
-                  )}
                   {step.assertions && step.assertions.length > 0 && (
                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
                       ✓ {step.assertions.length}
@@ -285,12 +292,18 @@ export default function StepEditor({
                       onTestUpdate={(updates) => {
                         const updatedStep = {
                           ...step,
-                          headers: updates.headers || step.headers,
-                          queryParams: updates.queryParams || step.queryParams,
+                          headers: updates.headers !== undefined ? updates.headers : step.headers,
+                          queryParams: updates.queryParams !== undefined ? updates.queryParams : step.queryParams,
                           body: updates.body !== undefined ? updates.body : step.body,
-                          assertions: updates.assertions || step.assertions
+                          assertions: updates.assertions !== undefined ? updates.assertions : step.assertions
                         }
                         handleStepUpdate(index, updatedStep)
+                      }}
+                      onHasChanges={(hasChanges, saveHandler) => {
+                        if (hasChanges) {
+                          // Debounced save to prevent rapid re-renders
+                          debouncedSave(saveHandler)
+                        }
                       }}
                       showSaveButton={false}
                       readOnly={mode === 'view'}
@@ -300,6 +313,14 @@ export default function StepEditor({
                       selectedEnvId={selectedEnvId}
                       onEnvChange={onEnvChange}
                       defaultAssertions={step.assertions}
+                      extractVariables={step.extractVariables}
+                      onExtractVariablesChange={(extractions) => {
+                        const updatedStep = {
+                          ...step,
+                          extractVariables: extractions
+                        }
+                        handleStepUpdate(index, updatedStep)
+                      }}
                     />
                   )
                 })()}

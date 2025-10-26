@@ -400,7 +400,7 @@ function isDateTimeField(name: string): boolean {
   return (
     lower.includes('date') ||
     lower.includes('time') ||
-    lower.includes('at') ||
+    lower.endsWith('_at') ||  // More specific: created_at, updated_at, deleted_at
     lower === 'created' ||
     lower === 'updated' ||
     lower === 'deleted' ||
