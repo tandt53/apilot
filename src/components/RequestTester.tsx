@@ -4,12 +4,13 @@ import VariableInput from './VariableInput'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import ResponseDisplay from './ResponseDisplay'
 import AssertionsSection from './AssertionsSection'
+import VariableExtractionEditor from './VariableExtractionEditor'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
 import {substituteBuiltInVariables} from '@/utils/variables'
 import {buildBodyFromSchema, bodyMatchesSchema} from '@/lib/utils/bodyHelpers'
 import {validateAssertions} from '@/lib/executor/testExecutor'
-import type {ExecutionResponse} from '@/types/database'
+import type {ExecutionResponse, VariableExtraction} from '@/types/database'
 
 interface Assertion {
     type: string
@@ -53,6 +54,9 @@ interface RequestTesterProps {
     onSessionChange?: (session: SessionState) => void
     // Default assertions (for reset button)
     defaultAssertions?: any[]
+    // Variable extraction props
+    extractVariables?: VariableExtraction[]
+    onExtractVariablesChange?: (extractions: VariableExtraction[]) => void
 }
 
 export default function RequestTester({
@@ -68,7 +72,9 @@ export default function RequestTester({
                                           onEnvChange,
                                           initialSession,
                                           onSessionChange,
-                                          defaultAssertions
+                                          defaultAssertions,
+                                          extractVariables: propsExtractVariables,
+                                          onExtractVariablesChange
                                       }: RequestTesterProps) {
     // Session state for tabs
     const [activeRequestTab, setActiveRequestTab] = useState<'headers' | 'params' | 'body' | 'auth'>(
@@ -290,6 +296,10 @@ export default function RequestTester({
 
     const [assertions, setAssertions] = useState<Assertion[]>(() => {
         return endpoint.assertions || []
+    })
+
+    const [extractVariables, setExtractVariables] = useState<VariableExtraction[]>(() => {
+        return propsExtractVariables || []
     })
 
     const originalValuesRef = useRef({
@@ -1060,6 +1070,63 @@ export default function RequestTester({
                     </div>
                 </div>
             )}
+
+            {/* Extract Variables Section */}
+            <div className="bg-white border border-gray-200 rounded-lg">
+                <div className="border-b border-gray-200 px-4 py-3">
+                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        📤 Extract Variables
+                        {extractVariables.length > 0 && (
+                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                {extractVariables.length}
+                            </span>
+                        )}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                        Extract values from response to use in subsequent steps
+                    </p>
+                </div>
+
+                <div className="p-4">
+                    <VariableExtractionEditor
+                        extractions={extractVariables}
+                        onExtractionsChange={(extractions) => {
+                            setExtractVariables(extractions)
+                            onExtractVariablesChange?.(extractions)
+                        }}
+                        mode={readOnly ? 'view' : 'edit'}
+                    />
+
+                    {/* Show extraction results after test execution */}
+                    {response?.extractedVariables && Object.keys(response.extractedVariables).length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                                ✅ Extraction Results
+                            </h4>
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                    <tr className="border-b border-green-200">
+                                        <th className="text-left py-2 px-2 font-semibold text-green-900">Variable</th>
+                                        <th className="text-left py-2 px-2 font-semibold text-green-900">Value</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {Object.entries(response.extractedVariables).map(([key, value]) => (
+                                        <tr key={key} className="border-b border-green-100 last:border-0">
+                                            <td className="py-2 px-2 font-mono text-purple-700">{key}</td>
+                                            <td className="py-2 px-2 font-mono text-gray-800">
+                                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* Assertions Section */}
             <AssertionsSection

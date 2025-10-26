@@ -37,7 +37,7 @@ export class OpenAIService extends AIService {
     })
     this.model = config.model || 'gpt-4o-mini'
     this.temperature = config.temperature ?? 0.7
-    this.maxTokens = config.maxTokens || 4096
+    this.maxTokens = config.maxTokens || 8192
     console.log('[OpenAI Service] Client created with model:', this.model)
   }
 
@@ -653,17 +653,25 @@ ${prompt}`
         metadata,
       }
     } catch (error: any) {
-      // For aborted requests, return partial results
-      if (error.message === 'ABORTED') {
-        console.log('Test generation aborted by user')
+      // Check if this is a stream termination error (socket closed)
+      const isStreamTerminated = error.message?.includes('terminated') ||
+                                 error.cause?.message?.includes('other side closed') ||
+                                 error.name === 'AbortError'
 
-        // Calculate what was completed before abort
+      // For aborted requests or stream termination, return partial results
+      if (error.message === 'ABORTED' || isStreamTerminated) {
+        const errorType = error.message === 'ABORTED' ? 'ABORTED' : 'STREAM_TERMINATED'
+        console.log(errorType === 'ABORTED'
+          ? 'Test generation aborted by user'
+          : 'OpenAI stream terminated - preserving partial results')
+
+        // Calculate what was completed before abort/termination
         const completedIds = Array.from(completedEndpointIds || [])
         const remainingEndpointIds = endpoints
           .filter(e => e.id && !completedIds.includes(e.id!))
           .map(e => e.id!)
 
-        // Track what was parsed before abort
+        // Track what was parsed before abort/termination
         for (const test of tests) {
           const parsedInfo: import('./base').ParsedTestInfo = {
             name: test.name || 'Untitled',
@@ -689,12 +697,14 @@ ${prompt}`
           tokenLimitReached: false
         }
 
+        console.log(`[OpenAI] ⚠️  ${errorType} - preserved ${tests.length} tests`)
+
         return {
           tests: tests || [],
           completed: false,
           completedEndpointIds: completedIds,
           remainingEndpointIds,
-          error: 'ABORTED',
+          error: errorType,
           metadata,
         }
       }

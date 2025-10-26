@@ -313,6 +313,14 @@ export default function StepEditor({
                       selectedEnvId={selectedEnvId}
                       onEnvChange={onEnvChange}
                       defaultAssertions={step.assertions}
+                      extractVariables={step.extractVariables}
+                      onExtractVariablesChange={(extractions) => {
+                        const updatedStep = {
+                          ...step,
+                          extractVariables: extractions
+                        }
+                        handleStepUpdate(index, updatedStep)
+                      }}
                     />
                   )
                 })()}
