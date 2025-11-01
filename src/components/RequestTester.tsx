@@ -1,11 +1,11 @@
 import {useEffect, useMemo, useRef, useState} from 'react'
-import {Code2, Info, Loader2, Play, ListOrdered, AlertTriangle} from 'lucide-react'
+import {Code2, Info, Loader2, Play, ListOrdered, AlertTriangle, Plus} from 'lucide-react'
 import {useQuery} from '@tanstack/react-query'
 import VariableInput from './VariableInput'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import ResponseDisplay from './ResponseDisplay'
 import AssertionsSection from './AssertionsSection'
-import VariableExtractionEditor from './VariableExtractionEditor'
+import VariableExtractionEditor, {type VariableExtractionEditorRef} from './VariableExtractionEditor'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
 import {substituteBuiltInVariables} from '@/utils/variables'
@@ -376,6 +376,9 @@ export default function RequestTester({
     // Environment info popover state
     const [showEnvInfo, setShowEnvInfo] = useState(false)
     const envInfoButtonRef = useRef<HTMLButtonElement>(null)
+
+    // Variable extraction editor ref
+    const variableExtractionEditorRef = useRef<VariableExtractionEditorRef>(null)
 
     // Save session state whenever relevant state changes
     useEffect(() => {
@@ -1184,22 +1187,36 @@ export default function RequestTester({
 
             {/* Extract Variables Section */}
             <div className="bg-white border border-gray-200 rounded-lg">
-                <div className="border-b border-gray-200 px-4 py-3">
-                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                        📤 Extract Variables
-                        {extractVariables.length > 0 && (
-                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                                {extractVariables.length}
-                            </span>
-                        )}
-                    </h3>
-                    <p className="text-sm text-gray-600 mt-1">
-                        Extract values from response to use in subsequent steps
-                    </p>
+                <div className="border-b border-gray-200 px-4 py-3 flex items-start justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                            📤 Extract Variables
+                            {extractVariables.length > 0 && (
+                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                    {extractVariables.length}
+                                </span>
+                            )}
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Extract values from response to use in subsequent steps
+                        </p>
+                    </div>
+
+                    {/* Add Button */}
+                    {!readOnly && (
+                        <button
+                            onClick={() => variableExtractionEditorRef.current?.openAddForm()}
+                            className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Add Variable Extraction"
+                        >
+                            <Plus size={20} />
+                        </button>
+                    )}
                 </div>
 
                 <div className="p-4">
                     <VariableExtractionEditor
+                        ref={variableExtractionEditorRef}
                         extractions={extractVariables}
                         onExtractionsChange={(extractions) => {
                             setExtractVariables(extractions)

@@ -3,9 +3,9 @@
  * UI for configuring variable extraction from HTTP responses
  */
 
-import {useState} from 'react'
+import {useState, useImperativeHandle, forwardRef} from 'react'
 import type {VariableExtraction} from '@/types/database'
-import {X, Edit2, CheckCircle2, XCircle} from 'lucide-react'
+import {X, Edit2, CheckCircle2, XCircle, Plus} from 'lucide-react'
 
 interface VariableExtractionEditorProps {
   extractions: VariableExtraction[]
@@ -14,12 +14,16 @@ interface VariableExtractionEditorProps {
   extractedValues?: Record<string, any> // Show extracted values after execution
 }
 
-export default function VariableExtractionEditor({
+export interface VariableExtractionEditorRef {
+  openAddForm: () => void
+}
+
+const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, VariableExtractionEditorProps>(({
   extractions,
   onExtractionsChange,
   mode,
   extractedValues
-}: VariableExtractionEditorProps) {
+}, ref) => {
   // Local state for editing (match Assertions pattern)
   const [showExtractionForm, setShowExtractionForm] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -29,6 +33,11 @@ export default function VariableExtractionEditor({
     path: '',
     defaultValue: undefined,
   })
+
+  // Expose openAddForm method via ref
+  useImperativeHandle(ref, () => ({
+    openAddForm: () => setShowExtractionForm(true)
+  }))
 
   // Apply changes (add or update extraction)
   const handleApply = () => {
@@ -76,22 +85,6 @@ export default function VariableExtractionEditor({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            {hasExecuted && extractions.length > 0 && (
-              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">
-                {Object.keys(extractedValues || {}).length}/{extractions.length}
-              </span>
-            )}
-            Extract Variables
-          </h3>
-          <p className="text-xs text-gray-600 mt-1">
-            Extract values from the response to use in subsequent steps
-          </p>
-        </div>
-      </div>
-
       {extractions.length === 0 && !showExtractionForm && (
         <p className="text-sm text-gray-500 italic">No variable extractions configured</p>
       )}
@@ -327,16 +320,10 @@ export default function VariableExtractionEditor({
           </p>
         </div>
       )}
-
-      {/* Add Button */}
-      {mode === 'edit' && !showExtractionForm && (
-        <button
-          onClick={() => setShowExtractionForm(true)}
-          className="w-full px-3 py-2 text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 border border-purple-200 rounded-lg transition-colors"
-        >
-          + Add Variable Extraction
-        </button>
-      )}
     </div>
   )
-}
+})
+
+VariableExtractionEditor.displayName = 'VariableExtractionEditor'
+
+export default VariableExtractionEditor
