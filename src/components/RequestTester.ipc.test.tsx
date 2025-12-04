@@ -8,6 +8,24 @@ import { userEvent } from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RequestTester from './RequestTester'
 
+// Extend Window interface for tests
+declare global {
+  interface Window {
+    electron?: {
+      executeTest: (params: any) => Promise<any>
+      importSpec: () => Promise<any>
+      testAIConnection: (params: any) => Promise<any>
+      generateTests: (params: any) => Promise<any>
+      onGenerateTestsProgress: (callback: (progress: any) => void) => void
+      onGenerateTestsTestGenerated: (callback: (test: any) => void) => void
+      removeGenerateTestsListeners: () => void
+      cancelGeneration: () => void
+      platform: string
+      getVersion: () => Promise<string>
+    }
+  }
+}
+
 // Create a test query client
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
