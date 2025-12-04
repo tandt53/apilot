@@ -5,7 +5,14 @@
 
 import {useState, useImperativeHandle, forwardRef} from 'react'
 import type {VariableExtraction} from '@/types/database'
-import {X, Edit2, CheckCircle2, XCircle, Plus} from 'lucide-react'
+import {X, Edit2, CheckCircle2, XCircle} from 'lucide-react'
+import {
+  validateVariableName,
+  validateJsonPath,
+  validateHeaderName,
+  validateNotReservedKeyword,
+  runValidations,
+} from '@/lib/utils/validation'
 
 interface VariableExtractionEditorProps {
   extractions: VariableExtraction[]
@@ -34,13 +41,70 @@ const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, Variabl
     defaultValue: undefined,
   })
 
+  // Validation state
+  const [errors, setErrors] = useState<{
+    name?: string
+    path?: string
+    headerName?: string
+  }>({})
+
   // Expose openAddForm method via ref
   useImperativeHandle(ref, () => ({
     openAddForm: () => setShowExtractionForm(true)
   }))
 
+  // Validation function
+  const validateForm = (): boolean => {
+    const newErrors: typeof errors = {}
+
+    // Validate variable name
+    const nameValidation = runValidations(
+      () => validateVariableName(newExtraction.name),
+      () => validateNotReservedKeyword(newExtraction.name)
+    )
+    if (!nameValidation.isValid) {
+      newErrors.name = nameValidation.error
+    }
+
+    // Check for duplicate names (case-insensitive)
+    const extractionsForDuplicateCheck = editingIndex !== null
+      ? extractions.filter((_, i) => i !== editingIndex)
+      : extractions
+
+    const isDuplicate = extractionsForDuplicateCheck.some(
+      ext => ext.name.toLowerCase().trim() === newExtraction.name.toLowerCase().trim()
+    )
+    if (isDuplicate) {
+      newErrors.name = 'Variable name already exists. Please use a unique name.'
+    }
+
+    // Validate JSONPath if source is response-body
+    if (newExtraction.source === 'response-body') {
+      const pathValidation = validateJsonPath(newExtraction.path || '')
+      if (!pathValidation.isValid) {
+        newErrors.path = pathValidation.error
+      }
+    }
+
+    // Validate header name if source is response-header
+    if (newExtraction.source === 'response-header') {
+      const headerValidation = validateHeaderName(newExtraction.headerName || '')
+      if (!headerValidation.isValid) {
+        newErrors.headerName = headerValidation.error
+      }
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
   // Apply changes (add or update extraction)
   const handleApply = () => {
+    // Validate before applying
+    if (!validateForm()) {
+      return
+    }
+
     if (editingIndex !== null) {
       // Update existing extraction
       const updated = [...extractions]
@@ -63,6 +127,7 @@ const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, Variabl
       path: '',
       defaultValue: undefined,
     })
+    setErrors({})
   }
 
   // Start editing existing extraction
@@ -203,10 +268,23 @@ const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, Variabl
               <input
                 type="text"
                 value={newExtraction.name}
-                onChange={(e) => handleFormUpdate({ name: e.target.value })}
+                onChange={(e) => {
+                  handleFormUpdate({ name: e.target.value })
+                  // Clear error on change
+                  if (errors.name) {
+                    setErrors(prev => ({ ...prev, name: undefined }))
+                  }
+                }}
                 placeholder="userId"
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className={`w-full px-2 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 ${
+                  errors.name
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
+              {errors.name && (
+                <p className="text-xs text-red-600 mt-1">{errors.name}</p>
+              )}
             </div>
 
             {/* Source */}
@@ -235,15 +313,29 @@ const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, Variabl
                 <input
                   type="text"
                   value={newExtraction.path || ''}
-                  onChange={(e) => handleFormUpdate({ path: e.target.value })}
+                  onChange={(e) => {
+                    handleFormUpdate({ path: e.target.value })
+                    // Clear error on change
+                    if (errors.path) {
+                      setErrors(prev => ({ ...prev, path: undefined }))
+                    }
+                  }}
                   placeholder="$.data.name"
-                  className="w-full px-2 py-1.5 text-sm font-mono border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className={`w-full px-2 py-1.5 text-sm font-mono border rounded focus:outline-none focus:ring-2 ${
+                    errors.path
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Examples: <code className="bg-white px-1 rounded">$.data.user.id</code>,{' '}
-                  <code className="bg-white px-1 rounded">$.items[0].name</code>,{' '}
-                  <code className="bg-white px-1 rounded">$.results.token</code>
-                </p>
+                {errors.path ? (
+                  <p className="text-xs text-red-600 mt-1">{errors.path}</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Examples: <code className="bg-white px-1 rounded">$.data.user.id</code>,{' '}
+                    <code className="bg-white px-1 rounded">$.items[0].name</code>,{' '}
+                    <code className="bg-white px-1 rounded">$.results.token</code>
+                  </p>
+                )}
               </div>
             )}
 
@@ -256,13 +348,27 @@ const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, Variabl
                 <input
                   type="text"
                   value={newExtraction.headerName || ''}
-                  onChange={(e) => handleFormUpdate({ headerName: e.target.value })}
+                  onChange={(e) => {
+                    handleFormUpdate({ headerName: e.target.value })
+                    // Clear error on change
+                    if (errors.headerName) {
+                      setErrors(prev => ({ ...prev, headerName: undefined }))
+                    }
+                  }}
                   placeholder="X-Auth-Token"
-                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className={`w-full px-2 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 ${
+                    errors.headerName
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Common examples: Authorization, X-Auth-Token, Set-Cookie, Location
-                </p>
+                {errors.headerName ? (
+                  <p className="text-xs text-red-600 mt-1">{errors.headerName}</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Common examples: Authorization, X-Auth-Token, Set-Cookie, Location
+                  </p>
+                )}
               </div>
             )}
 

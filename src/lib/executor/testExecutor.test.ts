@@ -613,5 +613,254 @@ describe('Test Executor', () => {
       expect(result.startedAt).toBeDefined()
       expect(result.completedAt).toBeDefined()
     })
+
+    it('should handle undefined variables by replacing with "undefined" string', async () => {
+      const testCase: TestCase = {
+        id: 'test-undefined-var',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with undefined variable',
+        method: 'GET',
+        path: '{{undefinedVar}}/users',
+        headers: {},
+        queryParams: {},
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const environment: Environment = {
+        id: 'env1',
+        specId: 1,
+        name: 'Test Env',
+        baseUrl: 'https://api.example.com',
+        variables: {
+          // undefinedVar is not defined
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+
+      const result = await executeTest(testCase, environment)
+
+      // Should replace undefined variable with the string "undefined"
+      expect(result.request.url).toContain('undefined/users')
+    })
+
+    it('should handle empty environment variables', async () => {
+      const testCase: TestCase = {
+        id: 'test-empty-env',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with empty environment',
+        method: 'GET',
+        path: '/users',
+        headers: {},
+        queryParams: {},
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const environment: Environment = {
+        id: 'env1',
+        specId: 1,
+        name: 'Empty Env',
+        baseUrl: '',
+        variables: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+
+      const result = await executeTest(testCase, environment)
+
+      expect(result.baseUrl).toBe('')
+      expect(result.status).toBeDefined()
+    })
+
+    it('should handle test case without environment', async () => {
+      const testCase: TestCase = {
+        id: 'test-no-env',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test without environment',
+        method: 'GET',
+        path: '/users',
+        headers: {},
+        queryParams: {},
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      expect(result.baseUrl).toBe('')
+      expect(result.environment).toBeUndefined()
+      expect(result.status).toBeDefined()
+    })
+
+    it('should handle malformed JSON in request body', async () => {
+      const testCase: TestCase = {
+        id: 'test-malformed-json',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with malformed JSON',
+        method: 'POST',
+        path: '/users',
+        headers: {},
+        queryParams: {},
+        body: '{invalid json}', // Malformed JSON
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      // Should not crash, body is stored as-is
+      const result = await executeTest(testCase)
+
+      expect(result.request.body).toBe('{invalid json}')
+      expect(result.status).toBeDefined()
+    })
+
+    it('should handle very large response times', async () => {
+      const testCase: TestCase = {
+        id: 'test-large-response-time',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with response time assertion',
+        method: 'GET',
+        path: '/users',
+        headers: {},
+        queryParams: {},
+        assertions: [
+          { id: 'a1', type: 'response-time', operator: 'less-than', expected: 1000 },
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      expect(result.response?.responseTime).toBeDefined()
+      expect(typeof result.response?.responseTime).toBe('number')
+    })
+
+    it('should handle special characters in path', async () => {
+      const testCase: TestCase = {
+        id: 'test-special-chars',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with special characters',
+        method: 'GET',
+        path: '/users?name=John%20Doe&tags=admin,developer',
+        headers: {},
+        queryParams: {},
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      expect(result.request.url).toContain('John%20Doe')
+      expect(result.status).toBeDefined()
+    })
+
+    it('should handle null values in query params', async () => {
+      const testCase: TestCase = {
+        id: 'test-null-params',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with null params',
+        method: 'GET',
+        path: '/users',
+        headers: {},
+        queryParams: {
+          filter: null as any,
+          sort: 'asc',
+        },
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      // Should handle null values gracefully
+      expect(result.status).toBeDefined()
+    })
+
+    it('should handle empty headers object', async () => {
+      const testCase: TestCase = {
+        id: 'test-empty-headers',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test with empty headers',
+        method: 'GET',
+        path: '/users',
+        headers: {},
+        queryParams: {},
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      expect(result.request.headers).toBeDefined()
+      expect(result.status).toBeDefined()
+    })
+
+    it('should preserve original request data in execution record', async () => {
+      const testCase: TestCase = {
+        id: 'test-preserve-request',
+        specId: 1,
+        currentEndpointId: 1,
+        name: 'Test request preservation',
+        method: 'POST',
+        path: '/users',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Custom-Header': 'test-value',
+        },
+        queryParams: {
+          filter: 'active',
+        },
+        body: {
+          name: 'Test User',
+          email: 'test@example.com',
+        },
+        assertions: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        executionCount: 0,
+        createdBy: 'test',
+      }
+
+      const result = await executeTest(testCase)
+
+      expect(result.request.method).toBe('POST')
+      expect(result.request.url).toContain('/users')
+      expect(result.request.url).toContain('filter=active')
+      expect(result.request.headers).toMatchObject(testCase.headers)
+      expect(result.request.body).toEqual(testCase.body)
+    })
   })
 })

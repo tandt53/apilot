@@ -630,8 +630,7 @@ export default function RequestTester({
     const substituteVariables = (text: string, variables: Record<string, string>): string => {
         // First pass: substitute built-in variables ({{$variableName}}) and {{baseUrl}}
         let result = substituteBuiltInVariables(text, {
-            selectedEnv,
-            defaultBaseUrl: 'http://localhost:3000'
+            selectedEnv
         })
 
         // Second pass: substitute environment variables ({{variableName}})

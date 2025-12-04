@@ -438,3 +438,13 @@ export interface AIProviderStatus {
   error?: string
   latency?: number // Connection test latency in ms
 }
+
+/**
+ * Encryption Key - Persistent key for API key encryption
+ * Singleton table (id always 1) to store the encryption key
+ */
+export interface EncryptionKey {
+  id: number // Always 1 (singleton)
+  key: string // Base64-encoded encryption key
+  createdAt: Date
+}

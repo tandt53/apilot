@@ -1,5 +1,6 @@
 import {useState} from 'react'
 import {Plus, Trash2} from 'lucide-react'
+import {validateParameterName, hasDuplicate} from '@/lib/utils/validation'
 
 interface Parameter {
   name: string
@@ -17,6 +18,7 @@ interface ParametersEditorProps {
 
 export default function ParametersEditor({parameters, onChange}: ParametersEditorProps) {
   const [params, setParams] = useState<Parameter[]>(parameters || [])
+  const [errors, setErrors] = useState<Record<number, string>>({}) // Map of index -> error message
 
   const handleAdd = () => {
     const newParam: Parameter = {
@@ -47,6 +49,32 @@ export default function ParametersEditor({parameters, onChange}: ParametersEdito
     })
     setParams(updated)
     onChange(updated)
+
+    // Validate parameter name when it changes
+    if (field === 'name') {
+      const newErrors = {...errors}
+
+      // Validate parameter name format
+      const nameValidation = validateParameterName(value)
+      if (!nameValidation.isValid) {
+        newErrors[index] = nameValidation.error!
+      } else {
+        // Check for duplicates
+        const isDuplicate = hasDuplicate(
+          updated,
+          (p) => p.name.toLowerCase().trim(),
+          index
+        )
+        if (isDuplicate) {
+          newErrors[index] = 'Parameter name already exists. Please use a unique name.'
+        } else {
+          // Clear error if validation passed
+          delete newErrors[index]
+        }
+      }
+
+      setErrors(newErrors)
+    }
   }
 
   return (
@@ -70,9 +98,16 @@ export default function ParametersEditor({parameters, onChange}: ParametersEdito
                   type="text"
                   value={param.name}
                   onChange={(e) => handleUpdate(index, 'name', e.target.value)}
-                  className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className={`w-full px-2 py-1.5 border rounded text-sm focus:outline-none focus:ring-2 ${
+                    errors[index]
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                   placeholder="paramName"
                 />
+                {errors[index] && (
+                  <p className="text-xs text-red-600 mt-1">{errors[index]}</p>
+                )}
               </div>
 
               {/* In */}

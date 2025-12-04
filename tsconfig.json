@@ -28,7 +28,10 @@
       "@/lib/*": ["./src/lib/*"],
       "@/utils/*": ["./src/utils/*"],
       "@/types/*": ["./src/types/*"]
-    }
+    },
+
+    /* Test support - include types for IDE support */
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "dist-electron", "release", "electron", "**/*.test.ts", "**/*.test.tsx"]

@@ -1,5 +1,7 @@
 import {Plus, X, File} from 'lucide-react'
+import {useState} from 'react'
 import VariableInput from './VariableInput'
+import {validateHeaderName, validateParameterName, hasDuplicate} from '@/lib/utils/validation'
 
 /**
  * KeyValueEditor - A flexible key-value pair editor
@@ -56,6 +58,9 @@ interface KeyValueEditorProps {
 
   // State
   readOnly?: boolean
+
+  // Validation context (to determine which validation rules to apply)
+  validationContext?: 'headers' | 'params' | 'variables' | 'none'
 }
 
 export default function KeyValueEditor({
@@ -71,7 +76,11 @@ export default function KeyValueEditor({
   selectedEnv,
   allowFileUpload = false,
   readOnly = false,
+  validationContext = 'none',
 }: KeyValueEditorProps) {
+  // Validation errors state (map of entry key -> error message)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
   // Get spec field names for checking
   const specFieldNames = specFields.map(f => f.name)
 
@@ -110,9 +119,63 @@ export default function KeyValueEditor({
     onChange(entries.filter(e => e.key !== key))
   }
 
-  // Update custom entry key
+  // Validate a key based on context
+  const validateKey = (key: string, entryIndex: number): string | undefined => {
+    if (!key || !key.trim()) {
+      return 'Key is required'
+    }
+
+    // Apply context-specific validation
+    let validation
+    if (validationContext === 'headers') {
+      validation = validateHeaderName(key)
+    } else if (validationContext === 'params') {
+      validation = validateParameterName(key)
+    } else if (validationContext === 'variables') {
+      validation = validateParameterName(key) // Use same rules as params
+    }
+
+    if (validation && !validation.isValid) {
+      return validation.error
+    }
+
+    // Check for duplicate keys (case-insensitive)
+    const allEntries = [...entries]
+    const isDuplicate = hasDuplicate(
+      allEntries,
+      (e) => e.key.toLowerCase().trim(),
+      entryIndex
+    )
+
+    if (isDuplicate) {
+      return 'Key already exists. Please use a unique key.'
+    }
+
+    return undefined
+  }
+
+  // Update custom entry key with validation
   const updateCustomEntryKey = (oldKey: string, newKey: string) => {
-    onChange(entries.map(e => e.key === oldKey ? { ...e, key: newKey } : e))
+    const entryIndex = entries.findIndex(e => e.key === oldKey)
+
+    // Update entries
+    const updatedEntries = entries.map(e => e.key === oldKey ? { ...e, key: newKey } : e)
+    onChange(updatedEntries)
+
+    // Validate if validation context is set
+    if (validationContext !== 'none') {
+      const error = validateKey(newKey, entryIndex)
+      setErrors(prev => {
+        const newErrors = { ...prev }
+        if (error) {
+          newErrors[newKey] = error
+        } else {
+          delete newErrors[oldKey]
+          delete newErrors[newKey]
+        }
+        return newErrors
+      })
+    }
   }
 
   // Variables for VariableInput
@@ -194,51 +257,66 @@ export default function KeyValueEditor({
         })}
 
         {/* SECTION 2: Custom entries (editable keys & values) */}
-        {customEntries.map((entry, idx) => (
-          <div key={idx} className="flex gap-2 items-center">
-            {/* Key input */}
-            <input
-              type="text"
-              value={entry.key}
-              onChange={(e) => updateCustomEntryKey(entry.key, e.target.value)}
-              placeholder={keyPlaceholder}
-              disabled={readOnly}
-              className="w-64 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
+        {customEntries.map((entry, idx) => {
+          const hasError = errors[entry.key]
 
-            {/* Value input */}
-            {allowVariables ? (
-              <VariableInput
-                value={entry.value}
-                onChange={(newValue) => updateEntry(entry.key, newValue)}
-                variables={variables}
-                placeholder={valuePlaceholder}
-                className="text-sm"
-                containerClassName="flex-1"
-              />
-            ) : (
-              <input
-                type="text"
-                value={entry.value}
-                onChange={(e) => updateEntry(entry.key, e.target.value)}
-                placeholder={valuePlaceholder}
-                disabled={readOnly}
-                className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            )}
+          return (
+            <div key={idx} className="flex flex-col gap-1">
+              <div className="flex gap-2 items-center">
+                {/* Key input */}
+                <div className="w-64">
+                  <input
+                    type="text"
+                    value={entry.key}
+                    onChange={(e) => updateCustomEntryKey(entry.key, e.target.value)}
+                    placeholder={keyPlaceholder}
+                    disabled={readOnly}
+                    className={`w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+                      hasError
+                        ? 'border-red-500 focus:ring-red-500'
+                        : 'border-gray-300 focus:ring-purple-500'
+                    }`}
+                  />
+                  {hasError && (
+                    <p className="text-xs text-red-600 mt-1">{hasError}</p>
+                  )}
+                </div>
 
-            {/* Delete button */}
-            {!readOnly && (
-              <button
-                onClick={() => removeCustomEntry(entry.key)}
-                className="p-2 text-gray-400 hover:text-red-600 rounded transition-colors"
-                title="Remove"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
-        ))}
+                {/* Value input */}
+                {allowVariables ? (
+                  <VariableInput
+                    value={entry.value}
+                    onChange={(newValue) => updateEntry(entry.key, newValue)}
+                    variables={variables}
+                    placeholder={valuePlaceholder}
+                    className="text-sm"
+                    containerClassName="flex-1"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={entry.value}
+                    onChange={(e) => updateEntry(entry.key, e.target.value)}
+                    placeholder={valuePlaceholder}
+                    disabled={readOnly}
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                )}
+
+                {/* Delete button */}
+                {!readOnly && (
+                  <button
+                    onClick={() => removeCustomEntry(entry.key)}
+                    className="p-2 text-gray-400 hover:text-red-600 rounded transition-colors"
+                    title="Remove"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
 
         {/* Add button */}
         {!readOnly && (

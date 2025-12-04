@@ -1,20 +1,89 @@
 /**
  * Encryption Utilities
  * Uses Web Crypto API for secure encryption of sensitive data (API keys)
+ *
+ * Strategy: Uses a persistent randomly-generated key stored in IndexedDB
+ * This ensures the key remains stable across sessions, browser updates, and OS changes
  */
+
+import { db } from '@/lib/db'
+
+const ENCRYPTION_KEY_ID = 1
 
 /**
- * Generate a key for encryption/decryption
- * Uses a combination of device-specific data as key material
+ * Get or create a persistent encryption key
+ * The key is stored in IndexedDB and reused across sessions
  */
-async function getEncryptionKey(): Promise<CryptoKey> {
-  // In a real application, you might want to derive this from:
-  // 1. Machine ID
-  // 2. User-specific salt
-  // 3. Or prompt user for a master password
+async function getPersistentEncryptionKey(): Promise<CryptoKey> {
+  try {
+    // Try to get existing key from database
+    const existingKey = await db.encryptionKeys.get(ENCRYPTION_KEY_ID)
 
-  // For this desktop app, we'll use a device-specific identifier
-  const keyMaterial = await getKeyMaterial()
+    if (existingKey) {
+      // Decode and import existing key
+      const keyData = base64ToArrayBuffer(existingKey.key)
+      // Convert Uint8Array to ArrayBuffer
+      const keyBuffer = keyData.buffer.slice(keyData.byteOffset, keyData.byteOffset + keyData.byteLength) as ArrayBuffer
+      return await window.crypto.subtle.importKey(
+        'raw',
+        keyBuffer,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      )
+    }
+
+    // No existing key - generate a new one
+    const newKey = await window.crypto.subtle.generateKey(
+      { name: 'AES-GCM', length: 256 },
+      true, // extractable (so we can store it)
+      ['encrypt', 'decrypt']
+    )
+
+    // Export and store the key
+    const exportedKey = await window.crypto.subtle.exportKey('raw', newKey)
+    const keyBase64 = arrayBufferToBase64(new Uint8Array(exportedKey))
+
+    await db.encryptionKeys.put({
+      id: ENCRYPTION_KEY_ID,
+      key: keyBase64,
+      createdAt: new Date(),
+    })
+
+    // Re-import as non-extractable for security
+    return await window.crypto.subtle.importKey(
+      'raw',
+      exportedKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    )
+  } catch (error) {
+    console.error('Failed to get persistent encryption key:', error)
+    // Fallback to device-based key for backward compatibility
+    return await getFallbackEncryptionKey()
+  }
+}
+
+/**
+ * Fallback encryption key based on device data (for backward compatibility)
+ * This was the original implementation - kept for migration purposes
+ */
+async function getFallbackEncryptionKey(): Promise<CryptoKey> {
+  const deviceInfo = [
+    navigator.userAgent,
+    navigator.language,
+    window.electron?.platform || 'unknown',
+  ].join('::')
+
+  const enc = new TextEncoder()
+  const keyMaterial = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(deviceInfo),
+    'PBKDF2',
+    false,
+    ['deriveBits', 'deriveKey']
+  )
 
   return await window.crypto.subtle.deriveKey(
     {
@@ -31,25 +100,10 @@ async function getEncryptionKey(): Promise<CryptoKey> {
 }
 
 /**
- * Get key material from device-specific data
+ * Get encryption key (uses persistent key)
  */
-async function getKeyMaterial(): Promise<CryptoKey> {
-  // Use a combination of device data as password
-  // In a real app, you might use hardware identifiers or user credentials
-  const deviceInfo = [
-    navigator.userAgent,
-    navigator.language,
-    window.electron?.platform || 'unknown',
-  ].join('::')
-
-  const enc = new TextEncoder()
-  return await window.crypto.subtle.importKey(
-    'raw',
-    enc.encode(deviceInfo),
-    'PBKDF2',
-    false,
-    ['deriveBits', 'deriveKey']
-  )
+async function getEncryptionKey(): Promise<CryptoKey> {
+  return await getPersistentEncryptionKey()
 }
 
 /**
@@ -117,6 +171,56 @@ export async function decryptData(encryptedBase64: string): Promise<string> {
   } catch (error) {
     console.error('Decryption failed:', error)
     throw new Error('Failed to decrypt data')
+  }
+}
+
+/**
+ * Attempt decryption with fallback to device-based key
+ * Used for migrating old encrypted data
+ */
+export async function decryptDataWithFallback(encryptedBase64: string): Promise<string> {
+  // Try with persistent key first
+  try {
+    return await decryptData(encryptedBase64)
+  } catch (firstError) {
+    console.warn('Persistent key decryption failed, trying fallback key...')
+
+    // Try with device-based fallback key
+    try {
+      const fallbackKey = await getFallbackEncryptionKey()
+      const combined = base64ToArrayBuffer(encryptedBase64)
+      const iv = combined.slice(0, 12)
+      const encrypted = combined.slice(12)
+
+      const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        fallbackKey,
+        encrypted
+      )
+
+      const dec = new TextDecoder()
+      const result = dec.decode(decrypted)
+
+      console.log('Successfully decrypted with fallback key - data may need re-encryption')
+      return result
+    } catch (secondError) {
+      console.error('Both decryption methods failed:', { firstError, secondError })
+      throw new Error('Failed to decrypt data - key may be corrupted')
+    }
+  }
+}
+
+/**
+ * Reset the persistent encryption key
+ * WARNING: This will invalidate all encrypted data
+ */
+export async function resetEncryptionKey(): Promise<void> {
+  try {
+    await db.encryptionKeys.delete(ENCRYPTION_KEY_ID)
+    console.log('Encryption key reset successfully')
+  } catch (error) {
+    console.error('Failed to reset encryption key:', error)
+    throw new Error('Failed to reset encryption key')
   }
 }
 

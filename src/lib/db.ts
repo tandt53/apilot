@@ -6,7 +6,7 @@
  */
 
 import Dexie, {Table} from 'dexie'
-import type {Endpoint, Environment, Settings, Spec, TestCase, TestExecution,} from '@/types/database'
+import type {Endpoint, Environment, Settings, Spec, TestCase, TestExecution, EncryptionKey} from '@/types/database'
 
 /**
  * Apilot Database
@@ -19,6 +19,7 @@ export class ApilotDB extends Dexie {
   executions!: Table<TestExecution, number>
   settings!: Table<Settings, number>
   environments!: Table<Environment, string>
+  encryptionKeys!: Table<EncryptionKey, number>
 
   constructor() {
     super('ApilotDB')
@@ -62,6 +63,13 @@ export class ApilotDB extends Dexie {
       // Primary: id (UUID)
       // Indexes: specId (to query all environments for a spec)
       environments: 'id, specId, name, createdAt, updatedAt',
+    })
+
+    // Version 2: Add encryption keys table for stable API key encryption
+    this.version(2).stores({
+      // Add encryptionKeys table (singleton)
+      // Primary: id (always 1)
+      encryptionKeys: 'id, createdAt',
     })
 
     // Hooks and middleware can be added here

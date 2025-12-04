@@ -5,6 +5,7 @@ import {useCreateEnvironment, useDeleteEnvironment, useUpdateEnvironment} from '
 import type {Environment} from '@/types/database'
 import KeyValueEditor from './KeyValueEditor'
 import {validateVariables, formatValidationErrors} from '@/lib/utils/validateVariables'
+import {validateUrl, validateTextLength} from '@/lib/utils/validation'
 
 interface EnvironmentManagerProps {
   specId: number
@@ -37,6 +38,11 @@ export default function EnvironmentManager({
     headers: {} as Record<string, string>,
   })
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [errors, setErrors] = useState<{
+    name?: string
+    baseUrl?: string
+    description?: string
+  }>({})
 
   // Environment mutations
   const createEnvironment = useCreateEnvironment()
@@ -55,10 +61,12 @@ export default function EnvironmentManager({
         headers: selectedEnv.headers || {},
       })
       setHasUnsavedChanges(false)
+      setErrors({})
     } else {
       setEditingEnv(null)
       setEnvForm({ name: '', baseUrl: '', description: '', variables: {}, headers: {} })
       setHasUnsavedChanges(false)
+      setErrors({})
     }
   }, [selectedEnv])
 
@@ -83,10 +91,62 @@ export default function EnvironmentManager({
     }
   }, [envForm, editingEnv])
 
+  // Validation function
+  const validateForm = (): boolean => {
+    const newErrors: typeof errors = {}
+
+    // Validate name
+    const nameValidation = validateTextLength(envForm.name, {
+      fieldName: 'Environment name',
+      required: true,
+      minLength: 1,
+      maxLength: 100
+    })
+    if (!nameValidation.isValid) {
+      newErrors.name = nameValidation.error
+    }
+
+    // Check for duplicate environment names (case-insensitive)
+    if (environments) {
+      const existingEnvs = editingEnv
+        ? environments.filter(env => env.id !== editingEnv.id)
+        : environments
+
+      const isDuplicate = existingEnvs.some(
+        env => env.name.toLowerCase().trim() === envForm.name.toLowerCase().trim()
+      )
+
+      if (isDuplicate) {
+        newErrors.name = 'Environment name already exists. Please use a unique name.'
+      }
+    }
+
+    // Validate base URL
+    const urlValidation = validateUrl(envForm.baseUrl, true)
+    if (!urlValidation.isValid) {
+      newErrors.baseUrl = urlValidation.error
+    }
+
+    // Validate description length (optional field)
+    if (envForm.description) {
+      const descValidation = validateTextLength(envForm.description, {
+        fieldName: 'Description',
+        required: false,
+        maxLength: 500
+      })
+      if (!descValidation.isValid) {
+        newErrors.description = descValidation.error
+      }
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
   // Handlers
   const handleCreateEnv = async () => {
-    if (!envForm.name || !envForm.baseUrl) {
-      alert('Name and Base URL are required')
+    // Validate form inputs
+    if (!validateForm()) {
       return
     }
 
@@ -108,11 +168,14 @@ export default function EnvironmentManager({
 
     onEnvChange(newEnv.id)
     setHasUnsavedChanges(false)
+    setErrors({})
   }
 
   const handleUpdateEnv = async () => {
-    if (!editingEnv || !envForm.name || !envForm.baseUrl) {
-      alert('Name and Base URL are required')
+    if (!editingEnv) return
+
+    // Validate form inputs
+    if (!validateForm()) {
       return
     }
 
@@ -131,6 +194,7 @@ export default function EnvironmentManager({
 
     onEnvChange(editingEnv.id)
     setHasUnsavedChanges(false)
+    setErrors({})
   }
 
   const handleDeleteEnv = async (envId: string) => {
@@ -178,6 +242,7 @@ export default function EnvironmentManager({
                 onEnvChange(null)
                 setEditingEnv(null)
                 setEnvForm({ name: '', baseUrl: '', description: '', variables: {}, headers: {} })
+                setErrors({})
               }}
               className={`flex items-center gap-1 text-xs text-purple-600 hover:bg-purple-50 rounded ${compact ? 'px-1.5 py-0.5' : 'px-2 py-1'}`}
               title="Add New Environment"
@@ -249,20 +314,44 @@ export default function EnvironmentManager({
               <input
                 type="text"
                 value={envForm.name}
-                onChange={(e) => setEnvForm({ ...envForm, name: e.target.value })}
+                onChange={(e) => {
+                  setEnvForm({ ...envForm, name: e.target.value })
+                  if (errors.name) {
+                    setErrors(prev => ({ ...prev, name: undefined }))
+                  }
+                }}
                 placeholder="e.g., Development"
-                className={`w-full border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
+                className={`w-full border rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'} focus:outline-none focus:ring-2 ${
+                  errors.name
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
+              {errors.name && (
+                <p className="text-xs text-red-600 mt-1">{errors.name}</p>
+              )}
             </div>
             <div>
               <label className={`block text-sm font-medium text-gray-700 ${compact ? 'mb-1 text-xs' : 'mb-1'}`}>Base URL *</label>
               <input
                 type="text"
                 value={envForm.baseUrl}
-                onChange={(e) => setEnvForm({ ...envForm, baseUrl: e.target.value })}
+                onChange={(e) => {
+                  setEnvForm({ ...envForm, baseUrl: e.target.value })
+                  if (errors.baseUrl) {
+                    setErrors(prev => ({ ...prev, baseUrl: undefined }))
+                  }
+                }}
                 placeholder="https://api.example.com"
-                className={`w-full border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
+                className={`w-full border rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'} focus:outline-none focus:ring-2 ${
+                  errors.baseUrl
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
+              {errors.baseUrl && (
+                <p className="text-xs text-red-600 mt-1">{errors.baseUrl}</p>
+              )}
             </div>
           </div>
 
@@ -271,10 +360,22 @@ export default function EnvironmentManager({
             <input
               type="text"
               value={envForm.description}
-              onChange={(e) => setEnvForm({ ...envForm, description: e.target.value })}
+              onChange={(e) => {
+                setEnvForm({ ...envForm, description: e.target.value })
+                if (errors.description) {
+                  setErrors(prev => ({ ...prev, description: undefined }))
+                }
+              }}
               placeholder="Optional description"
-              className={`w-full border border-gray-300 rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'}`}
+              className={`w-full border rounded text-sm ${compact ? 'px-2 py-1' : 'px-3 py-2'} focus:outline-none focus:ring-2 ${
+                errors.description
+                  ? 'border-red-500 focus:ring-red-500'
+                  : 'border-gray-300 focus:ring-purple-500'
+              }`}
             />
+            {errors.description && (
+              <p className="text-xs text-red-600 mt-1">{errors.description}</p>
+            )}
           </div>
 
           {/* Variables */}
@@ -337,6 +438,7 @@ export default function EnvironmentManager({
                     onEnvChange(null)
                     setEditingEnv(null)
                     setEnvForm({ name: '', baseUrl: '', description: '', variables: {}, headers: {} })
+                    setErrors({})
                   }}
                   className={`bg-gray-200 text-gray-700 rounded hover:bg-gray-300 ${compact ? 'px-3 py-1 text-xs' : 'px-4 py-2 text-sm'}`}
                 >

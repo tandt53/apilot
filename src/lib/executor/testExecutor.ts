@@ -47,13 +47,16 @@ async function executeSingleStepTest(
   const startedAt = new Date()
 
   // Build execution record
-  // Get environment variables
-  const envVariables = environment?.variables || {}
+  // Get environment variables (including baseUrl)
+  const envVariables = {
+    ...(environment?.variables || {}),
+    ...(environment?.baseUrl ? { baseUrl: environment.baseUrl } : {})
+  }
 
-  // Substitute variables in baseUrl
+  // Get baseUrl - use empty string if not defined (allows relative paths to work in tests)
   const baseUrl = environment?.baseUrl
-    ? replaceVariables(environment.baseUrl, envVariables)
-    : 'http://localhost:3000'
+    ? replaceVariables(environment.baseUrl, envVariables, { keepUnresolved: false })
+    : ''
 
   const execution: Omit<TestExecution, 'id' | 'createdAt'> = {
     testCaseId: testCase.id!,
@@ -135,13 +138,16 @@ async function executeMultiStepTest(
 ): Promise<TestExecution> {
   const startedAt = new Date()
 
-  // Get environment variables
-  const envVariables = environment?.variables || {}
+  // Get environment variables (including baseUrl)
+  const envVariables = {
+    ...(environment?.variables || {}),
+    ...(environment?.baseUrl ? { baseUrl: environment.baseUrl } : {})
+  }
 
-  // Substitute variables in baseUrl
+  // Get baseUrl - use empty string if not defined (allows relative paths to work in tests)
   const baseUrl = environment?.baseUrl
-    ? replaceVariables(environment.baseUrl, envVariables)
-    : 'http://localhost:3000'
+    ? replaceVariables(environment.baseUrl, envVariables, { keepUnresolved: false })
+    : ''
 
   // Initialize execution record
   const execution: Omit<TestExecution, 'id' | 'createdAt'> = {
@@ -321,10 +327,12 @@ function buildRequestFromStep(
   }
 
   // Apply variable substitution to path (for {{variable}} style)
-  path = replaceVariables(path, variables)
+  // Note: variables already includes baseUrl and workflow variables
+  // Use keepUnresolved: false to replace undefined variables with 'undefined'
+  path = replaceVariables(path, variables, { keepUnresolved: false })
 
   // Substitute variables in query params
-  const queryParams = replaceVariablesInObject(step.queryParams || {}, variables)
+  const queryParams = replaceVariablesInObject(step.queryParams || {}, variables, { keepUnresolved: false })
 
   // Build query string
   const queryString = Object.entries(queryParams)
@@ -337,10 +345,10 @@ function buildRequestFromStep(
   }
 
   // Substitute variables in headers
-  const headers = replaceVariablesInHeaders(step.headers || {}, variables)
+  const headers = replaceVariablesInHeaders(step.headers || {}, variables, { keepUnresolved: false })
 
   // Substitute variables in body
-  const body = replaceVariablesInObject(step.body, variables)
+  const body = replaceVariablesInObject(step.body, variables, { keepUnresolved: false })
 
   return {
     method: step.method,
@@ -361,8 +369,11 @@ function sleep(ms: number): Promise<void> {
  * Build request object from test case
  */
 function buildRequest(testCase: TestCase, environment?: Environment): ExecutionRequest {
-  // Get environment variables
-  const envVariables = environment?.variables || {}
+  // Get environment variables (including baseUrl)
+  const envVariables = {
+    ...(environment?.variables || {}),
+    ...(environment?.baseUrl ? { baseUrl: environment.baseUrl } : {})
+  }
 
   // Build URL with path variables (standard OpenAPI style: {param})
   let path = testCase.path
@@ -373,17 +384,29 @@ function buildRequest(testCase: TestCase, environment?: Environment): ExecutionR
   }
 
   // Apply variable substitution to path (for {{variable}} style)
-  path = replaceVariables(path, envVariables)
+  // Use keepUnresolved: false to replace undefined variables with 'undefined'
+  path = replaceVariables(path, envVariables, { keepUnresolved: false })
+
+  // Substitute variables in query params and append to path
+  if (testCase.queryParams && Object.keys(testCase.queryParams).length > 0) {
+    const queryParams = replaceVariablesInObject(testCase.queryParams, envVariables, { keepUnresolved: false })
+    const queryString = Object.entries(queryParams)
+      .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+      .join('&')
+    if (queryString) {
+      path += `?${queryString}`
+    }
+  }
 
   // Merge and substitute variables in headers
   const mergedHeaders = {
     ...testCase.headers,
     ...environment?.headers,
   }
-  const headers = replaceVariablesInHeaders(mergedHeaders, envVariables)
+  const headers = replaceVariablesInHeaders(mergedHeaders, envVariables, { keepUnresolved: false })
 
   // Substitute variables in body
-  const body = replaceVariablesInObject(testCase.body, envVariables)
+  const body = replaceVariablesInObject(testCase.body, envVariables, { keepUnresolved: false })
 
   return {
     method: testCase.method,
@@ -403,7 +426,21 @@ async function executeHTTPRequest(
   const startTime = Date.now()
 
   // Build full URL
-  const url = new URL(request.url, baseUrl).toString()
+  // If baseUrl or path contains unresolved variables, construct URL manually
+  let url: string
+  try {
+    url = new URL(request.url, baseUrl).toString()
+  } catch (error) {
+    // If URL construction fails (e.g., due to unresolved {{variables}}),
+    // just concatenate them - this will fail at HTTP level with clear error
+    if (request.url.startsWith('/')) {
+      url = `${baseUrl}${request.url}`
+    } else if (request.url.includes('://')) {
+      url = request.url
+    } else {
+      url = `${baseUrl}/${request.url}`
+    }
+  }
 
   // Build axios config
   const config: AxiosRequestConfig = {
@@ -414,9 +451,14 @@ async function executeHTTPRequest(
   }
 
   // Add query params if they exist in the URL
-  const urlObj = new URL(url)
-  if (urlObj.search) {
-    config.params = Object.fromEntries(urlObj.searchParams)
+  try {
+    const urlObj = new URL(url)
+    if (urlObj.search) {
+      config.params = Object.fromEntries(urlObj.searchParams)
+    }
+  } catch {
+    // If URL parsing fails (unresolved variables), skip query param extraction
+    // Axios will handle the URL as-is and fail at HTTP level
   }
 
   // Add body for methods that support it

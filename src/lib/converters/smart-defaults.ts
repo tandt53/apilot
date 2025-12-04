@@ -396,15 +396,12 @@ function isFilterParameter(name: string): boolean {
 }
 
 function isDateTimeField(name: string): boolean {
-  const lower = name.toLowerCase()
+  // Use case-insensitive regex to match word boundaries
+  // This handles both snake_case (created_at) and camelCase (createdAt)
   return (
-    lower.includes('date') ||
-    lower.includes('time') ||
-    lower.endsWith('_at') ||  // More specific: created_at, updated_at, deleted_at
-    lower === 'created' ||
-    lower === 'updated' ||
-    lower === 'deleted' ||
-    lower === 'timestamp'
+    /date|time|created|updated|deleted|timestamp/i.test(name) ||
+    name.endsWith('_at') ||
+    name.endsWith('At')  // Handle camelCase: createdAt, updatedAt
   )
 }
 

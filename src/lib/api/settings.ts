@@ -5,7 +5,7 @@
 
 import {db} from '@/lib/db'
 import type {Settings} from '@/types/database'
-import {decryptData, encryptData} from '@/utils/crypto'
+import {decryptDataWithFallback, encryptData} from '@/utils/crypto'
 
 const SETTINGS_ID = 1
 
@@ -177,6 +177,7 @@ export async function updateOllamaSettings(config: {
 
 /**
  * Get decrypted API key for provider
+ * @throws Error with specific message if decryption fails
  */
 export async function getDecryptedAPIKey(
   provider: 'openai' | 'anthropic' | 'gemini'
@@ -185,15 +186,57 @@ export async function getDecryptedAPIKey(
   const providerSettings = settings.aiSettings[provider]
 
   if (!providerSettings || !providerSettings.apiKey) {
-    return null
+    return null // Key not set - this is normal
   }
 
   try {
-    return await decryptData(providerSettings.apiKey)
+    // Try decryption with fallback for migration
+    const decrypted = await decryptDataWithFallback(providerSettings.apiKey)
+
+    // If decrypted with fallback key, re-encrypt with persistent key for future use
+    if (decrypted) {
+      console.log(`Re-encrypting ${provider} API key with persistent key...`)
+      const reEncrypted = await encryptData(decrypted)
+
+      // Update settings with re-encrypted key
+      await updateSettings({
+        aiSettings: {
+          ...settings.aiSettings,
+          [provider]: {
+            ...providerSettings,
+            apiKey: reEncrypted,
+          },
+        },
+      })
+    }
+
+    return decrypted
   } catch (error) {
     console.error(`Failed to decrypt ${provider} API key:`, error)
-    return null
+    throw new Error(
+      `Failed to decrypt ${provider} API key. The key may be corrupted. ` +
+      `Please go to Settings and re-enter your API key.`
+    )
   }
+}
+
+/**
+ * Clear a corrupted API key for a provider
+ */
+export async function clearCorruptedAPIKey(
+  provider: 'openai' | 'anthropic' | 'gemini'
+): Promise<void> {
+  const settings = await getSettings()
+
+  await updateSettings({
+    aiSettings: {
+      ...settings.aiSettings,
+      [provider]: {
+        ...settings.aiSettings[provider],
+        apiKey: '',
+      },
+    },
+  })
 }
 
 /**

@@ -124,7 +124,7 @@ export function substituteBuiltInVariables(
   // Second pass: Handle {{baseUrl}} (environment-aware variable)
   if (result.includes('{{baseUrl}}') && context) {
     const baseUrl =
-      context.selectedEnv?.baseUrl || context.defaultBaseUrl || 'http://localhost:3000'
+      context.selectedEnv?.baseUrl || context.defaultBaseUrl || 'undefined'
     result = result.replace(/\{\{baseUrl\}\}/g, baseUrl)
   }
 
