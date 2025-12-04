@@ -48,8 +48,8 @@ export function replaceVariables(
       return String(varValue)
     }
 
-    // If variable not found, either keep placeholder or remove it
-    return keepUnresolved ? match : ''
+    // If variable not found, either keep placeholder or replace with 'undefined'
+    return keepUnresolved ? match : 'undefined'
   })
 }
 

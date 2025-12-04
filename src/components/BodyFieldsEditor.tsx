@@ -1,6 +1,7 @@
 import {useState} from 'react'
 import {Plus, Trash2} from 'lucide-react'
 import type {CanonicalField} from '@/types/canonical'
+import {validateParameterName, hasDuplicate} from '@/lib/utils/validation'
 
 interface BodyFieldsEditorProps {
   fields: CanonicalField[]
@@ -9,6 +10,7 @@ interface BodyFieldsEditorProps {
 
 export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorProps) {
   const [bodyFields, setBodyFields] = useState<CanonicalField[]>(fields || [])
+  const [errors, setErrors] = useState<Record<number, string>>({}) // Map of index -> error message
 
   const handleAdd = () => {
     const newField: CanonicalField = {
@@ -38,6 +40,32 @@ export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorPro
     })
     setBodyFields(updated)
     onChange(updated)
+
+    // Validate field name when it changes
+    if (field === 'name') {
+      const newErrors = {...errors}
+
+      // Validate field name format (use same validation as parameter names)
+      const nameValidation = validateParameterName(value)
+      if (!nameValidation.isValid) {
+        newErrors[index] = nameValidation.error!
+      } else {
+        // Check for duplicates
+        const isDuplicate = hasDuplicate(
+          updated,
+          (f) => f.name.toLowerCase().trim(),
+          index
+        )
+        if (isDuplicate) {
+          newErrors[index] = 'Field name already exists. Please use a unique name.'
+        } else {
+          // Clear error if validation passed
+          delete newErrors[index]
+        }
+      }
+
+      setErrors(newErrors)
+    }
   }
 
   return (
@@ -70,9 +98,16 @@ export default function BodyFieldsEditor({fields, onChange}: BodyFieldsEditorPro
                   type="text"
                   value={field.name}
                   onChange={(e) => handleUpdate(index, 'name', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className={`w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 ${
+                    errors[index]
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                   placeholder="Field name"
                 />
+                {errors[index] && (
+                  <p className="text-xs text-red-600 mt-1">{errors[index]}</p>
+                )}
               </div>
 
               {/* Type */}

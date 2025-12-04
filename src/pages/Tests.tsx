@@ -121,6 +121,21 @@ export default function Tests() {
   const [steps, setSteps] = useState<TestStep[]>([])
   const [originalSteps, setOriginalSteps] = useState<TestStep[]>([])
 
+  // Workflow variables state (persisted per test for manual step execution)
+  const [workflowVariables, setWorkflowVariables] = useState<Record<string, any>>(() => {
+    if (selectedTestId) {
+      const saved = localStorage.getItem(`apilot-workflow-vars-test-${selectedTestId}`)
+      if (saved) {
+        try {
+          return JSON.parse(saved)
+        } catch (error) {
+          console.error('[Tests] Failed to load workflow variables:', error)
+        }
+      }
+    }
+    return {}
+  })
+
   // Create test modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newTestSpecId, setNewTestSpecId] = useState<number | null>(null)
@@ -518,6 +533,42 @@ export default function Tests() {
   useEffect(() => {
     setSelectedStepIndex(null)
   }, [selectedTestId])
+
+  // Load workflow variables when test changes
+  useEffect(() => {
+    if (selectedTestId) {
+      const saved = localStorage.getItem(`apilot-workflow-vars-test-${selectedTestId}`)
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          console.log('[Tests] Loaded workflow variables for test', selectedTestId, ':', parsed)
+          setWorkflowVariables(parsed)
+        } catch (error) {
+          console.error('[Tests] Failed to load workflow variables:', error)
+          setWorkflowVariables({})
+        }
+      } else {
+        setWorkflowVariables({})
+      }
+    } else {
+      setWorkflowVariables({})
+    }
+  }, [selectedTestId])
+
+  // Save workflow variables when they change
+  useEffect(() => {
+    if (selectedTestId) {
+      try {
+        localStorage.setItem(
+          `apilot-workflow-vars-test-${selectedTestId}`,
+          JSON.stringify(workflowVariables)
+        )
+        console.log('[Tests] Saved workflow variables for test', selectedTestId, ':', workflowVariables)
+      } catch (error) {
+        console.error('[Tests] Failed to save workflow variables:', error)
+      }
+    }
+  }, [workflowVariables, selectedTestId])
 
   // Persist selected test ID
   useEffect(() => {
@@ -1669,6 +1720,9 @@ export default function Tests() {
                     onEnvChange={setSelectedEnvId}
                     mode="edit"
                     specId={String(selectedTest.specId)}
+                    testId={selectedTest.id}
+                    workflowVariables={workflowVariables}
+                    onWorkflowVariablesChange={setWorkflowVariables}
                   />
                 </div>
               </div>
@@ -1926,6 +1980,9 @@ export default function Tests() {
                   onEnvChange={() => {}}
                   mode="edit"
                   specId={String(newTestSpecId || '')}
+                  testId={undefined}
+                  workflowVariables={{}}
+                  onWorkflowVariablesChange={() => {}}
                 />
               </div>
             </div>

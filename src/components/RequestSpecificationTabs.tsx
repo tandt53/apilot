@@ -29,6 +29,7 @@ interface RequestSpecificationTabsProps {
   onContentTypeChange?: (contentType: string) => void
   // Common props
   selectedEnv?: any
+  workflowVariables?: Record<string, any> // Variables from previous workflow steps
   readOnly?: boolean
   // Tab control props
   initialActiveTab?: RequestTab
@@ -58,6 +59,7 @@ export default function RequestSpecificationTabs({
   onBodyFieldsChange,
   onContentTypeChange,
   selectedEnv,
+  workflowVariables = {},
   readOnly = false,
   initialActiveTab = 'params',
   onActiveTabChange
@@ -67,6 +69,14 @@ export default function RequestSpecificationTabs({
   const handleTabChange = (tab: RequestTab) => {
     setActiveTab(tab)
     onActiveTabChange?.(tab)
+  }
+
+  // Merge environment variables with workflow variables
+  // Workflow variables take precedence over environment variables
+  const allVariables = {
+    ...(selectedEnv?.variables || {}),
+    ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+    ...workflowVariables
   }
 
   const contentType = (mode === 'edit' || mode === 'test') ? (headers['Content-Type'] || 'application/json') : (endpoint.request?.contentType || 'application/json')
@@ -195,13 +205,13 @@ export default function RequestSpecificationTabs({
             ) : mode === 'test' ? (
               // Test mode - custom entries only (full freedom to add/edit/remove)
               <div className="space-y-4">
-                {/* Content-Type Display (Read-only in test mode) */}
+                {/* Content-Type Info */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-gray-700">Content-Type:</span>
                     <code className="text-sm text-purple-600 font-mono">{contentType}</code>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">💡 Change Content-Type in the Body tab</p>
+                  <p className="text-xs text-gray-500 mt-1">💡 Edit in the Body tab</p>
                 </div>
 
                 {/* Headers - custom entries only */}
@@ -287,12 +297,31 @@ export default function RequestSpecificationTabs({
             ) : mode === 'test' ? (
               // Test mode - Show form inputs for filling values
               <div>
-                {/* Content-Type Display (Read-only in test mode) */}
+                {/* Content-Type Selector (Editable in test mode) */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Content-Type</label>
-                  <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
-                    <code className="text-sm text-purple-600 font-mono">{contentType}</code>
-                  </div>
+                  <select
+                    value={contentType}
+                    onChange={(e) => {
+                      const newContentType = e.target.value
+                      handleContentTypeChange(newContentType)
+
+                      // Clear body when switching content types to avoid format mismatch
+                      if (contentType.includes('json') && !newContentType.includes('json')) {
+                        onBodyChange?.('')
+                        onFormDataChange?.({})
+                      } else if (!contentType.includes('json') && newContentType.includes('json')) {
+                        onFormDataChange?.({})
+                        onBodyChange?.('{\n  \n}')
+                      }
+                    }}
+                    disabled={readOnly}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="application/json">application/json</option>
+                    <option value="multipart/form-data">multipart/form-data</option>
+                    <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+                  </select>
                 </div>
 
                 {contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded') ? (
@@ -356,10 +385,7 @@ export default function RequestSpecificationTabs({
                     <VariableInput
                       value={body}
                       onChange={(value) => onBodyChange?.(value)}
-                      variables={{
-                        ...(selectedEnv?.variables || {}),
-                        ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {})
-                      }}
+                      variables={allVariables}
                       placeholder={endpoint.request.body.example ? JSON.stringify(endpoint.request.body.example, null, 2) : '{\n  \n}'}
                       multiline={true}
                       rows={10}

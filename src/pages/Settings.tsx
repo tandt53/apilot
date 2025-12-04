@@ -4,6 +4,12 @@ import {testAIConnection} from '@/lib/ai'
 import {Check, CheckCircle2, Cpu, X, AlertCircle, Info, Zap} from 'lucide-react'
 import ResizablePanel from '@/components/ResizablePanel'
 import PageLayout from '@/components/PageLayout'
+import {
+  validateOpenAIKey,
+  validateAnthropicKey,
+  validateGeminiKey,
+  validateUrl
+} from '@/lib/utils/validation'
 
 export default function Settings() {
   const { data: settings } = useSettings()
@@ -30,6 +36,14 @@ export default function Settings() {
   const [ollamaModel, setOllamaModel] = useState('llama3.1:8b')
   const [ollamaTemperature, setOllamaTemperature] = useState(0.7)
   const [ollamaMaxTokens, setOllamaMaxTokens] = useState(4096)
+
+  // Validation errors
+  const [errors, setErrors] = useState<{
+    openaiKey?: string
+    anthropicKey?: string
+    geminiKey?: string
+    ollamaUrl?: string
+  }>({})
 
   // Load settings from database when component mounts
   useEffect(() => {
@@ -98,8 +112,14 @@ export default function Settings() {
           // Use form key if provided and not masked, otherwise load from database
           let apiKey = openaiKey
           if (!apiKey || apiKey === maskedValue) {
-            const { getDecryptedAPIKey } = await import('@/lib/api/settings')
-            apiKey = await getDecryptedAPIKey('openai') || ''
+            try {
+              const { getDecryptedAPIKey } = await import('@/lib/api/settings')
+              apiKey = await getDecryptedAPIKey('openai') || ''
+            } catch (error: any) {
+              setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: error.message } }))
+              setTesting(false)
+              return
+            }
           }
 
           if (!apiKey || apiKey === maskedValue) {
@@ -114,8 +134,14 @@ export default function Settings() {
         case 'anthropic': {
           let apiKey = anthropicKey
           if (!apiKey || apiKey === maskedValue) {
-            const { getDecryptedAPIKey } = await import('@/lib/api/settings')
-            apiKey = await getDecryptedAPIKey('anthropic') || ''
+            try {
+              const { getDecryptedAPIKey } = await import('@/lib/api/settings')
+              apiKey = await getDecryptedAPIKey('anthropic') || ''
+            } catch (error: any) {
+              setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: error.message } }))
+              setTesting(false)
+              return
+            }
           }
 
           if (!apiKey || apiKey === maskedValue) {
@@ -130,8 +156,14 @@ export default function Settings() {
         case 'gemini': {
           let apiKey = geminiKey
           if (!apiKey || apiKey === maskedValue) {
-            const { getDecryptedAPIKey } = await import('@/lib/api/settings')
-            apiKey = await getDecryptedAPIKey('gemini') || ''
+            try {
+              const { getDecryptedAPIKey } = await import('@/lib/api/settings')
+              apiKey = await getDecryptedAPIKey('gemini') || ''
+            } catch (error: any) {
+              setTestResults((prev) => ({ ...prev, [selectedProvider]: { success: false, message: error.message } }))
+              setTesting(false)
+              return
+            }
           }
 
           if (!apiKey || apiKey === maskedValue) {
@@ -158,9 +190,50 @@ export default function Settings() {
   }
 
   const handleSave = async () => {
+    // Validate inputs before saving
+    const newErrors: typeof errors = {}
+    const maskedValue = '••••••••••••••••'
+
+    // Validate OpenAI key if provided and not masked
+    if (openaiKey && openaiKey !== maskedValue) {
+      const validation = validateOpenAIKey(openaiKey)
+      if (!validation.isValid) {
+        newErrors.openaiKey = validation.error
+      }
+    }
+
+    // Validate Anthropic key if provided and not masked
+    if (anthropicKey && anthropicKey !== maskedValue) {
+      const validation = validateAnthropicKey(anthropicKey)
+      if (!validation.isValid) {
+        newErrors.anthropicKey = validation.error
+      }
+    }
+
+    // Validate Gemini key if provided and not masked
+    if (geminiKey && geminiKey !== maskedValue) {
+      const validation = validateGeminiKey(geminiKey)
+      if (!validation.isValid) {
+        newErrors.geminiKey = validation.error
+      }
+    }
+
+    // Validate Ollama URL
+    if (ollamaUrl) {
+      const validation = validateUrl(ollamaUrl, true)
+      if (!validation.isValid) {
+        newErrors.ollamaUrl = validation.error
+      }
+    }
+
+    // If there are validation errors, show them and stop
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors)
+      return
+    }
+
     try {
       const aiSettings: any = {}
-      const maskedValue = '••••••••••••••••'
 
       // Only save OpenAI key if it's not the masked placeholder
       if (openaiKey && openaiKey !== maskedValue) {
@@ -231,6 +304,7 @@ export default function Settings() {
         aiSettings
       })
 
+      setErrors({}) // Clear errors on successful save
       alert('Settings saved successfully!')
     } catch (error: any) {
       alert(`Failed to save settings: ${error.message}`)
@@ -313,13 +387,26 @@ export default function Settings() {
               <input
                 type="password"
                 value={openaiKey}
-                onChange={(e) => setOpenaiKey(e.target.value)}
+                onChange={(e) => {
+                  setOpenaiKey(e.target.value)
+                  if (errors.openaiKey) {
+                    setErrors(prev => ({ ...prev, openaiKey: undefined }))
+                  }
+                }}
                 placeholder="sk-... (leave empty to keep existing)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent ${
+                  errors.openaiKey
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                {openaiKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
-              </p>
+              {errors.openaiKey ? (
+                <p className="text-xs text-red-600 mt-1">{errors.openaiKey}</p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">
+                  {openaiKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
@@ -368,13 +455,26 @@ export default function Settings() {
               <input
                 type="password"
                 value={anthropicKey}
-                onChange={(e) => setAnthropicKey(e.target.value)}
+                onChange={(e) => {
+                  setAnthropicKey(e.target.value)
+                  if (errors.anthropicKey) {
+                    setErrors(prev => ({ ...prev, anthropicKey: undefined }))
+                  }
+                }}
                 placeholder="sk-ant-... (leave empty to keep existing)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent ${
+                  errors.anthropicKey
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                {anthropicKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
-              </p>
+              {errors.anthropicKey ? (
+                <p className="text-xs text-red-600 mt-1">{errors.anthropicKey}</p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">
+                  {anthropicKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
@@ -423,13 +523,26 @@ export default function Settings() {
               <input
                 type="password"
                 value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
+                onChange={(e) => {
+                  setGeminiKey(e.target.value)
+                  if (errors.geminiKey) {
+                    setErrors(prev => ({ ...prev, geminiKey: undefined }))
+                  }
+                }}
                 placeholder="AI... (leave empty to keep existing)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent ${
+                  errors.geminiKey
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                {geminiKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
-              </p>
+              {errors.geminiKey ? (
+                <p className="text-xs text-red-600 mt-1">{errors.geminiKey}</p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">
+                  {geminiKey === '••••••••••••••••' ? 'API key is saved (masked for security)' : 'Leave empty to keep your existing API key'}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
@@ -483,11 +596,24 @@ export default function Settings() {
               <input
                 type="text"
                 value={ollamaUrl}
-                onChange={(e) => setOllamaUrl(e.target.value)}
+                onChange={(e) => {
+                  setOllamaUrl(e.target.value)
+                  if (errors.ollamaUrl) {
+                    setErrors(prev => ({ ...prev, ollamaUrl: undefined }))
+                  }
+                }}
                 placeholder="http://localhost:11434"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent ${
+                  errors.ollamaUrl
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
-              <p className="text-xs text-gray-500 mt-1">Examples: http://localhost:11434 (Ollama), http://localhost:1234/v1 (LM Studio)</p>
+              {errors.ollamaUrl ? (
+                <p className="text-xs text-red-600 mt-1">{errors.ollamaUrl}</p>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">Examples: http://localhost:11434 (Ollama), http://localhost:1234/v1 (LM Studio)</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Model Name</label>

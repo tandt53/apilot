@@ -277,9 +277,9 @@ describe('Dynamic Variables', () => {
       expect(result).toBe('http://localhost:8080/api/users')
     })
 
-    it('should fallback to localhost:3000 when no baseUrl in context', () => {
+    it('should fallback to "undefined" when no baseUrl in context', () => {
       const result = substituteBuiltInVariables('{{baseUrl}}/api/users', {})
-      expect(result).toBe('http://localhost:3000/api/users')
+      expect(result).toBe('undefined/api/users')
     })
 
     it('should preserve {{baseUrl}} when no context provided', () => {

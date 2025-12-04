@@ -1,7 +1,7 @@
 {
   "name": "apilot",
   "productName": "Apilot",
-  "version": "1.2.0-beta.4",
+  "version": "1.2.0-beta.5",
   "description": "Desktop API Testing Tool with AI",
   "homepage": "https://apilot.app",
   "repository": {
@@ -72,6 +72,7 @@
     "@typescript-eslint/eslint-plugin": "^8.46.0",
     "@typescript-eslint/parser": "^8.46.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
@@ -114,8 +115,20 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.icns"
     },

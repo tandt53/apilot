@@ -5,7 +5,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RequestTester from './RequestTester'
+
+// Extend Window interface for tests
+declare global {
+  interface Window {
+    electron?: {
+      executeTest: (params: any) => Promise<any>
+      importSpec: () => Promise<any>
+      testAIConnection: (params: any) => Promise<any>
+      generateTests: (params: any) => Promise<any>
+      onGenerateTestsProgress: (callback: (progress: any) => void) => void
+      onGenerateTestsTestGenerated: (callback: (test: any) => void) => void
+      removeGenerateTestsListeners: () => void
+      cancelGeneration: () => void
+      platform: string
+      getVersion: () => Promise<string>
+    }
+  }
+}
+
+// Create a test query client
+const createTestQueryClient = () => new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+})
+
+// Helper to render with QueryClient
+const renderWithQueryClient = (ui: React.ReactElement) => {
+  const testQueryClient = createTestQueryClient()
+  return render(
+    <QueryClientProvider client={testQueryClient}>
+      {ui}
+    </QueryClientProvider>
+  )
+}
 
 // Mock window.electron
 const mockExecuteTest = vi.fn()
@@ -54,7 +95,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -87,7 +128,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -129,7 +170,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={postEndpoint as any}
           specId="1"
@@ -179,7 +220,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={formEndpoint as any}
           specId="1"
@@ -210,7 +251,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={formEndpoint as any}
           specId="1"
@@ -233,7 +274,7 @@ describe('RequestTester IPC Integration', () => {
     it('should display network errors from IPC', async () => {
       mockExecuteTest.mockRejectedValueOnce(new Error('Network error'))
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -259,7 +300,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(errorResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -300,7 +341,7 @@ describe('RequestTester IPC Integration', () => {
 
       mockExecuteTest.mockResolvedValueOnce(mockResponse)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -337,7 +378,7 @@ describe('RequestTester IPC Integration', () => {
         json: async () => ({ message: 'Success' })
       } as any)
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mockEndpoint as any}
           specId="1"
@@ -370,7 +411,7 @@ describe('RequestTester IPC Integration', () => {
         path: '/api/users/{{$uuid}}'
       }
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={endpointWithBuiltIns as any}
           specId="1"
@@ -416,7 +457,7 @@ describe('RequestTester IPC Integration', () => {
         }
       }
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={postEndpoint as any}
           specId="1"
@@ -454,7 +495,7 @@ describe('RequestTester IPC Integration', () => {
         path: '/api/users/{{$uuid}}'
       }
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={endpointWithBuiltIns as any}
           specId="1"
@@ -507,7 +548,7 @@ describe('RequestTester IPC Integration', () => {
         path: '/api/users/{{userId}}/sessions/{{$uuid}}'
       }
 
-      render(
+      renderWithQueryClient(
         <RequestTester
           endpoint={mixedEndpoint as any}
           specId="1"

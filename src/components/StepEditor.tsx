@@ -17,6 +17,9 @@ interface StepEditorProps {
   onEnvChange?: (envId: string | null) => void
   mode: 'view' | 'edit'
   specId?: string
+  testId?: number // For session persistence
+  workflowVariables?: Record<string, any> // Variables from previous steps
+  onWorkflowVariablesChange?: (variables: Record<string, any>) => void
 }
 
 export default function StepEditor({
@@ -27,9 +30,56 @@ export default function StepEditor({
   selectedEnvId,
   onEnvChange,
   mode,
-  specId
+  specId,
+  testId,
+  workflowVariables = {},
+  onWorkflowVariablesChange
 }: StepEditorProps) {
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+
+  // Session persistence helpers
+  const getSessionKey = (stepId: string) => {
+    return testId !== undefined
+      ? `apilot-session-v1-test-${testId}-step-${stepId}`
+      : null
+  }
+
+  const loadSession = (stepId: string) => {
+    const key = getSessionKey(stepId)
+    if (!key) return undefined
+
+    try {
+      const saved = localStorage.getItem(key)
+      if (!saved) return undefined
+      return JSON.parse(saved)
+    } catch (error) {
+      console.error('[StepEditor] Failed to load session:', error)
+      return undefined
+    }
+  }
+
+  const saveSession = (stepId: string, session: any) => {
+    const key = getSessionKey(stepId)
+    if (!key) return
+
+    try {
+      localStorage.setItem(key, JSON.stringify(session))
+    } catch (error) {
+      console.error('[StepEditor] Failed to save session:', error)
+    }
+  }
+
+  const cleanupSession = (stepId: string) => {
+    const key = getSessionKey(stepId)
+    if (key) {
+      try {
+        localStorage.removeItem(key)
+        console.log('[StepEditor] Cleaned up session for step', stepId)
+      } catch (error) {
+        console.error('[StepEditor] Failed to cleanup session:', error)
+      }
+    }
+  }
 
   // Debounce save to prevent rapid re-renders
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -59,6 +109,10 @@ export default function StepEditor({
     if (!confirm(`Delete ${steps[index].name}?`)) return
 
     const deletedStepId = steps[index].id
+
+    // Clean up session for deleted step
+    cleanupSession(deletedStepId)
+
     const updatedSteps = steps.filter((_, i) => i !== index)
     // Reorder remaining steps
     updatedSteps.forEach((step, i) => {
@@ -122,10 +176,10 @@ export default function StepEditor({
           <div key={step.id} className="border border-gray-200 rounded-lg bg-white">
             {/* Card Header */}
             <div
-              className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+              className="flex items-center justify-between py-2 px-3 cursor-pointer hover:bg-gray-50"
               onClick={() => toggleStep(step.id)}
             >
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 {/* Expand/Collapse Icon */}
                 <button
                   className="text-gray-400 hover:text-gray-600 flex-shrink-0"
@@ -134,36 +188,57 @@ export default function StepEditor({
                     toggleStep(step.id)
                   }}
                 >
-                  {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
 
-                {/* Step Number */}
-                <span className="text-sm font-semibold text-gray-500 flex-shrink-0">
-                  {step.order}
-                </span>
-
-                {/* Method Badge */}
-                <span className={`text-xs font-semibold px-2 py-1 rounded flex-shrink-0 ${getMethodColor(step.method)}`}>
-                  {step.method}
-                </span>
-
-                {/* Step Name and Path */}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900 truncate">
-                    {step.name}
-                  </div>
-                  <div className="text-xs text-gray-600 font-mono truncate">
-                    {step.path}
-                  </div>
-                </div>
-
-                {/* Badges for assertions */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {step.assertions && step.assertions.length > 0 && (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                      ✓ {step.assertions.length}
-                    </span>
+                {/* Step Name and Path - 2 rows */}
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  {/* Step Name - Row 1 */}
+                  {mode === 'edit' ? (
+                    <input
+                      type="text"
+                      value={step.name}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        handleStepUpdate(index, { ...step, name: e.target.value })
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-sm font-medium text-gray-900 bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-purple-500 rounded px-1 -ml-1 py-0.5 leading-tight"
+                      placeholder="Step name"
+                      size={Math.max(10, step.name.length || 10)}
+                    />
+                  ) : (
+                    <div className="text-sm font-medium text-gray-900 leading-tight py-0.5">
+                      {step.name}
+                    </div>
                   )}
+
+                  {/* Step Path - Row 2 with Method Badge */}
+                  <div className="flex items-center gap-2">
+                    {/* Method Badge */}
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0 w-16 text-center ${getMethodColor(step.method)}`}>
+                      {step.method}
+                    </span>
+
+                    {mode === 'edit' ? (
+                      <input
+                        type="text"
+                        value={step.path}
+                        onChange={(e) => {
+                          e.stopPropagation()
+                          handleStepUpdate(index, { ...step, path: e.target.value })
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sm font-mono text-gray-600 bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-purple-500 rounded px-1 -ml-1 py-0.5 leading-tight"
+                        placeholder="/path"
+                        size={Math.max(10, step.path.length || 10)}
+                      />
+                    ) : (
+                      <div className="text-sm text-gray-600 font-mono leading-tight py-0.5">
+                        {step.path}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -292,6 +367,7 @@ export default function StepEditor({
                       onTestUpdate={(updates) => {
                         const updatedStep = {
                           ...step,
+                          method: updates.method !== undefined ? updates.method : step.method,
                           headers: updates.headers !== undefined ? updates.headers : step.headers,
                           queryParams: updates.queryParams !== undefined ? updates.queryParams : step.queryParams,
                           body: updates.body !== undefined ? updates.body : step.body,
@@ -321,6 +397,15 @@ export default function StepEditor({
                         }
                         handleStepUpdate(index, updatedStep)
                       }}
+                      // Session persistence
+                      initialSession={loadSession(step.id)}
+                      onSessionChange={(session) => saveSession(step.id, session)}
+                      // Workflow variables (for manual step testing)
+                      workflowVariables={workflowVariables}
+                      onWorkflowVariablesChange={onWorkflowVariablesChange}
+                      // Source endpoint tracking (for deviation warning)
+                      sourceEndpointId={step.sourceEndpointId}
+                      isCustomEndpoint={step.isCustomEndpoint}
                     />
                   )
                 })()}

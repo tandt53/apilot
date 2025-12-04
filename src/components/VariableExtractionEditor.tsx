@@ -3,75 +3,263 @@
  * UI for configuring variable extraction from HTTP responses
  */
 
+import {useState, useImperativeHandle, forwardRef} from 'react'
 import type {VariableExtraction} from '@/types/database'
-import {X} from 'lucide-react'
+import {X, Edit2, CheckCircle2, XCircle} from 'lucide-react'
+import {
+  validateVariableName,
+  validateJsonPath,
+  validateHeaderName,
+  validateNotReservedKeyword,
+  runValidations,
+} from '@/lib/utils/validation'
 
 interface VariableExtractionEditorProps {
   extractions: VariableExtraction[]
   onExtractionsChange: (extractions: VariableExtraction[]) => void
   mode: 'view' | 'edit'
+  extractedValues?: Record<string, any> // Show extracted values after execution
 }
 
-export default function VariableExtractionEditor({
+export interface VariableExtractionEditorRef {
+  openAddForm: () => void
+}
+
+const VariableExtractionEditor = forwardRef<VariableExtractionEditorRef, VariableExtractionEditorProps>(({
   extractions,
   onExtractionsChange,
-  mode
-}: VariableExtractionEditorProps) {
-  const handleAdd = () => {
-    onExtractionsChange([
-      ...extractions,
-      {
-        name: '',
-        source: 'response-body',
-        path: '',
-        defaultValue: undefined,
+  mode,
+  extractedValues
+}, ref) => {
+  // Local state for editing (match Assertions pattern)
+  const [showExtractionForm, setShowExtractionForm] = useState(false)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [newExtraction, setNewExtraction] = useState<VariableExtraction>({
+    name: '',
+    source: 'response-body',
+    path: '',
+    defaultValue: undefined,
+  })
+
+  // Validation state
+  const [errors, setErrors] = useState<{
+    name?: string
+    path?: string
+    headerName?: string
+  }>({})
+
+  // Expose openAddForm method via ref
+  useImperativeHandle(ref, () => ({
+    openAddForm: () => setShowExtractionForm(true)
+  }))
+
+  // Validation function
+  const validateForm = (): boolean => {
+    const newErrors: typeof errors = {}
+
+    // Validate variable name
+    const nameValidation = runValidations(
+      () => validateVariableName(newExtraction.name),
+      () => validateNotReservedKeyword(newExtraction.name)
+    )
+    if (!nameValidation.isValid) {
+      newErrors.name = nameValidation.error
+    }
+
+    // Check for duplicate names (case-insensitive)
+    const extractionsForDuplicateCheck = editingIndex !== null
+      ? extractions.filter((_, i) => i !== editingIndex)
+      : extractions
+
+    const isDuplicate = extractionsForDuplicateCheck.some(
+      ext => ext.name.toLowerCase().trim() === newExtraction.name.toLowerCase().trim()
+    )
+    if (isDuplicate) {
+      newErrors.name = 'Variable name already exists. Please use a unique name.'
+    }
+
+    // Validate JSONPath if source is response-body
+    if (newExtraction.source === 'response-body') {
+      const pathValidation = validateJsonPath(newExtraction.path || '')
+      if (!pathValidation.isValid) {
+        newErrors.path = pathValidation.error
       }
-    ])
+    }
+
+    // Validate header name if source is response-header
+    if (newExtraction.source === 'response-header') {
+      const headerValidation = validateHeaderName(newExtraction.headerName || '')
+      if (!headerValidation.isValid) {
+        newErrors.headerName = headerValidation.error
+      }
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
   }
 
-  const handleUpdate = (index: number, updates: Partial<VariableExtraction>) => {
-    const updated = [...extractions]
-    updated[index] = { ...updated[index], ...updates }
-    onExtractionsChange(updated)
+  // Apply changes (add or update extraction)
+  const handleApply = () => {
+    // Validate before applying
+    if (!validateForm()) {
+      return
+    }
+
+    if (editingIndex !== null) {
+      // Update existing extraction
+      const updated = [...extractions]
+      updated[editingIndex] = newExtraction
+      onExtractionsChange(updated)
+    } else {
+      // Add new extraction
+      onExtractionsChange([...extractions, newExtraction])
+    }
+    handleCancel()
+  }
+
+  // Cancel editing
+  const handleCancel = () => {
+    setShowExtractionForm(false)
+    setEditingIndex(null)
+    setNewExtraction({
+      name: '',
+      source: 'response-body',
+      path: '',
+      defaultValue: undefined,
+    })
+    setErrors({})
+  }
+
+  // Start editing existing extraction
+  const handleEdit = (index: number) => {
+    setNewExtraction(extractions[index])
+    setEditingIndex(index)
+    setShowExtractionForm(true)
+  }
+
+  // Update form fields (don't save immediately)
+  const handleFormUpdate = (updates: Partial<VariableExtraction>) => {
+    setNewExtraction(prev => ({ ...prev, ...updates }))
   }
 
   const handleDelete = (index: number) => {
     onExtractionsChange(extractions.filter((_, i) => i !== index))
   }
 
+  const hasExecuted = extractedValues !== undefined
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">Extract Variables</h3>
-          <p className="text-xs text-gray-600 mt-1">
-            Extract values from the response to use in subsequent steps
-          </p>
-        </div>
-      </div>
-
-      {extractions.length === 0 && mode === 'view' && (
+      {extractions.length === 0 && !showExtractionForm && (
         <p className="text-sm text-gray-500 italic">No variable extractions configured</p>
       )}
 
-      {extractions.map((extraction, index) => (
-        <div key={index} className="border border-gray-200 rounded-lg p-3 bg-white">
-          <div className="flex items-start justify-between mb-3">
-            <h4 className="text-xs font-semibold text-gray-700">
-              Extraction {index + 1}
-            </h4>
-            {mode === 'edit' && (
-              <button
-                onClick={() => handleDelete(index)}
-                className="text-gray-400 hover:text-red-600"
-                title="Remove extraction"
-              >
-                <X size={16} />
-              </button>
+      {/* Display existing extractions */}
+      {extractions.map((extraction, index) => {
+        const wasExtracted = extractedValues?.[extraction.name] !== undefined
+        const extractionFailed = hasExecuted && !wasExtracted
+
+        return (
+          <div
+            key={index}
+            className={`border rounded-lg p-3 ${
+              wasExtracted ? 'border-green-300 bg-green-50' :
+              extractionFailed ? 'border-red-300 bg-red-50' :
+              'border-gray-200 bg-white'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <code className="text-sm font-mono text-purple-600">
+                  {extraction.name}
+                </code>
+
+                {wasExtracted && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                    <CheckCircle2 size={12} />
+                    Extracted
+                  </span>
+                )}
+
+                {extractionFailed && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+                    <XCircle size={12} />
+                    Failed
+                  </span>
+                )}
+              </div>
+
+              {mode === 'edit' && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleEdit(index)}
+                    className="text-gray-400 hover:text-purple-600 p-1"
+                    title="Edit extraction"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(index)}
+                    className="text-gray-400 hover:text-red-600 p-1"
+                    title="Remove extraction"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Show extraction details */}
+            <div className="text-xs text-gray-600 space-y-1">
+              <div>
+                <span className="font-medium">From:</span> {
+                  extraction.source === 'response-body' ? 'Response Body (JSONPath)' :
+                  extraction.source === 'response-header' ? 'Response Header' :
+                  extraction.source === 'status-code' ? 'Status Code' :
+                  'Response Time (ms)'
+                }
+              </div>
+              {extraction.path && (
+                <div>
+                  <span className="font-medium">Path:</span>{' '}
+                  <code className="bg-white px-1 rounded">{extraction.path}</code>
+                </div>
+              )}
+              {extraction.headerName && (
+                <div>
+                  <span className="font-medium">Header:</span>{' '}
+                  <code className="bg-white px-1 rounded">{extraction.headerName}</code>
+                </div>
+              )}
+            </div>
+
+            {/* Show extracted value */}
+            {wasExtracted && (
+              <div className="mt-2 text-xs">
+                <span className="font-medium text-gray-700">Value:</span>{' '}
+                <code className="bg-white px-1.5 py-0.5 rounded border border-green-300">
+                  {JSON.stringify(extractedValues![extraction.name])}
+                </code>
+              </div>
+            )}
+
+            {extractionFailed && (
+              <div className="mt-2 text-xs text-red-600">
+                Failed to extract - check your JSONPath or header name
+              </div>
             )}
           </div>
+        )
+      })}
 
-          <div className="grid grid-cols-2 gap-3">
+      {/* Edit/Add Extraction Form */}
+      {showExtractionForm && (
+        <div className="border-2 border-purple-300 rounded-lg p-4 bg-purple-50">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">
+            {editingIndex !== null ? 'Edit Extraction' : 'Add Extraction'}
+          </h4>
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
             {/* Variable Name */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -79,12 +267,24 @@ export default function VariableExtractionEditor({
               </label>
               <input
                 type="text"
-                value={extraction.name}
-                onChange={(e) => handleUpdate(index, { name: e.target.value })}
+                value={newExtraction.name}
+                onChange={(e) => {
+                  handleFormUpdate({ name: e.target.value })
+                  // Clear error on change
+                  if (errors.name) {
+                    setErrors(prev => ({ ...prev, name: undefined }))
+                  }
+                }}
                 placeholder="userId"
-                disabled={mode === 'view'}
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                className={`w-full px-2 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 ${
+                  errors.name
+                    ? 'border-red-500 focus:ring-red-500'
+                    : 'border-gray-300 focus:ring-purple-500'
+                }`}
               />
+              {errors.name && (
+                <p className="text-xs text-red-600 mt-1">{errors.name}</p>
+              )}
             </div>
 
             {/* Source */}
@@ -93,10 +293,9 @@ export default function VariableExtractionEditor({
                 Extract From <span className="text-red-500">*</span>
               </label>
               <select
-                value={extraction.source}
-                onChange={(e) => handleUpdate(index, { source: e.target.value as any })}
-                disabled={mode === 'view'}
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                value={newExtraction.source}
+                onChange={(e) => handleFormUpdate({ source: e.target.value as any })}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="response-body">Response Body (JSONPath)</option>
                 <option value="response-header">Response Header</option>
@@ -106,44 +305,70 @@ export default function VariableExtractionEditor({
             </div>
 
             {/* JSONPath (if source is response-body) */}
-            {extraction.source === 'response-body' && (
+            {newExtraction.source === 'response-body' && (
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   JSONPath Expression <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
-                  value={extraction.path || ''}
-                  onChange={(e) => handleUpdate(index, { path: e.target.value })}
-                  placeholder="$.data.id"
-                  disabled={mode === 'view'}
-                  className="w-full px-2 py-1.5 text-sm font-mono border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                  value={newExtraction.path || ''}
+                  onChange={(e) => {
+                    handleFormUpdate({ path: e.target.value })
+                    // Clear error on change
+                    if (errors.path) {
+                      setErrors(prev => ({ ...prev, path: undefined }))
+                    }
+                  }}
+                  placeholder="$.data.name"
+                  className={`w-full px-2 py-1.5 text-sm font-mono border rounded focus:outline-none focus:ring-2 ${
+                    errors.path
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Examples: <code className="bg-gray-100 px-1 rounded">$.data.user.id</code>,{' '}
-                  <code className="bg-gray-100 px-1 rounded">$.items[0].name</code>,{' '}
-                  <code className="bg-gray-100 px-1 rounded">$.results.token</code>
-                </p>
+                {errors.path ? (
+                  <p className="text-xs text-red-600 mt-1">{errors.path}</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Examples: <code className="bg-white px-1 rounded">$.data.user.id</code>,{' '}
+                    <code className="bg-white px-1 rounded">$.items[0].name</code>,{' '}
+                    <code className="bg-white px-1 rounded">$.results.token</code>
+                  </p>
+                )}
               </div>
             )}
 
             {/* Header Name (if source is response-header) */}
-            {extraction.source === 'response-header' && (
+            {newExtraction.source === 'response-header' && (
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Header Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
-                  value={extraction.headerName || ''}
-                  onChange={(e) => handleUpdate(index, { headerName: e.target.value })}
+                  value={newExtraction.headerName || ''}
+                  onChange={(e) => {
+                    handleFormUpdate({ headerName: e.target.value })
+                    // Clear error on change
+                    if (errors.headerName) {
+                      setErrors(prev => ({ ...prev, headerName: undefined }))
+                    }
+                  }}
                   placeholder="X-Auth-Token"
-                  disabled={mode === 'view'}
-                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                  className={`w-full px-2 py-1.5 text-sm border rounded focus:outline-none focus:ring-2 ${
+                    errors.headerName
+                      ? 'border-red-500 focus:ring-red-500'
+                      : 'border-gray-300 focus:ring-purple-500'
+                  }`}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Common examples: Authorization, X-Auth-Token, Set-Cookie, Location
-                </p>
+                {errors.headerName ? (
+                  <p className="text-xs text-red-600 mt-1">{errors.headerName}</p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Common examples: Authorization, X-Auth-Token, Set-Cookie, Location
+                  </p>
+                )}
               </div>
             )}
 
@@ -153,10 +378,9 @@ export default function VariableExtractionEditor({
                 Transform
               </label>
               <select
-                value={extraction.transform || ''}
-                onChange={(e) => handleUpdate(index, { transform: (e.target.value || undefined) as any })}
-                disabled={mode === 'view'}
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                value={newExtraction.transform || ''}
+                onChange={(e) => handleFormUpdate({ transform: (e.target.value || undefined) as any })}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="">None</option>
                 <option value="to-string">To String</option>
@@ -173,25 +397,39 @@ export default function VariableExtractionEditor({
               </label>
               <input
                 type="text"
-                value={extraction.defaultValue || ''}
-                onChange={(e) => handleUpdate(index, { defaultValue: e.target.value || undefined })}
+                value={newExtraction.defaultValue || ''}
+                onChange={(e) => handleFormUpdate({ defaultValue: e.target.value || undefined })}
                 placeholder="(optional)"
-                disabled={mode === 'view'}
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-50"
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
           </div>
-        </div>
-      ))}
 
-      {mode === 'edit' && (
-        <button
-          onClick={handleAdd}
-          className="w-full px-3 py-2 text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 border border-purple-200 rounded-lg transition-colors"
-        >
-          + Add Variable Extraction
-        </button>
+          {/* Apply/Cancel Buttons */}
+          <div className="flex justify-end gap-2 mt-3">
+            <button
+              onClick={handleCancel}
+              className="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApply}
+              className="px-4 py-2 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors"
+            >
+              Apply
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-600 mt-2">
+            Click <strong>Save</strong> button above to persist changes
+          </p>
+        </div>
       )}
     </div>
   )
-}
+})
+
+VariableExtractionEditor.displayName = 'VariableExtractionEditor'
+
+export default VariableExtractionEditor

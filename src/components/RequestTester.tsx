@@ -1,16 +1,19 @@
-import {useEffect, useRef, useState} from 'react'
-import {Code2, Info, Loader2, Play, ListOrdered} from 'lucide-react'
+import {useEffect, useMemo, useRef, useState} from 'react'
+import {Code2, Info, Loader2, Play, ListOrdered, AlertTriangle, Plus} from 'lucide-react'
+import {useQuery} from '@tanstack/react-query'
 import VariableInput from './VariableInput'
 import RequestSpecificationTabs from './RequestSpecificationTabs'
 import ResponseDisplay from './ResponseDisplay'
 import AssertionsSection from './AssertionsSection'
-import VariableExtractionEditor from './VariableExtractionEditor'
+import VariableExtractionEditor, {type VariableExtractionEditorRef} from './VariableExtractionEditor'
 import EnvironmentInfoPopover from './EnvironmentInfoPopover'
 import {getMethodColor} from '@/lib/utils/methodColors'
 import {substituteBuiltInVariables} from '@/utils/variables'
 import {buildBodyFromSchema, bodyMatchesSchema} from '@/lib/utils/bodyHelpers'
 import {validateAssertions} from '@/lib/executor/testExecutor'
+import {extractVariablesFromResponse} from '@/lib/executor/variableExtractor'
 import type {ExecutionResponse, VariableExtraction} from '@/types/database'
+import {getEndpoint} from '@/lib/api/endpoints'
 
 interface Assertion {
     type: string
@@ -20,6 +23,7 @@ interface Assertion {
 }
 
 export interface SessionState {
+    testCaseId?: number // Track which test this session belongs to
     activeRequestTab: 'headers' | 'params' | 'body' | 'auth'
     activeResponseTab: 'body' | 'headers'
     lastResponse: any | null
@@ -57,6 +61,22 @@ interface RequestTesterProps {
     // Variable extraction props
     extractVariables?: VariableExtraction[]
     onExtractVariablesChange?: (extractions: VariableExtraction[]) => void
+    // Workflow variables (for manual step testing)
+    workflowVariables?: Record<string, any>
+    onWorkflowVariablesChange?: (variables: Record<string, any>) => void
+    // Source endpoint tracking (for deviation warning)
+    sourceEndpointId?: number
+    isCustomEndpoint?: boolean
+}
+
+// Path normalization helper
+function normalizePath(path: string): string {
+  return path
+    .replace(/\{\{baseUrl\}\}/g, '') // Remove baseUrl variable
+    .replace(/\/\d+/g, '/{var}')    // /users/123 → /users/{var}
+    .replace(/\/\{\{[^}]+\}\}/g, '/{var}') // /users/{{id}} → /users/{var}
+    .replace(/\/[a-f0-9-]{36}/g, '/{var}') // UUIDs
+    .replace(/\/$/, '') // Remove trailing slash
 }
 
 export default function RequestTester({
@@ -74,7 +94,11 @@ export default function RequestTester({
                                           onSessionChange,
                                           defaultAssertions,
                                           extractVariables: propsExtractVariables,
-                                          onExtractVariablesChange
+                                          onExtractVariablesChange,
+                                          workflowVariables = {},
+                                          onWorkflowVariablesChange,
+                                          sourceEndpointId,
+                                          isCustomEndpoint = false
                                       }: RequestTesterProps) {
     // Session state for tabs
     const [activeRequestTab, setActiveRequestTab] = useState<'headers' | 'params' | 'body' | 'auth'>(
@@ -105,7 +129,35 @@ export default function RequestTester({
         return `{{baseUrl}}${path}`
     })
 
-    const [method] = useState(endpoint.method || 'GET')
+    const [method, setMethod] = useState(endpoint.method || 'GET')
+
+    // Merge environment variables with workflow variables
+    // Workflow variables take precedence over environment variables
+    const allVariables = {
+        ...(selectedEnv?.variables || {}),
+        ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
+        ...workflowVariables
+    }
+
+    // Fetch source endpoint if available (for deviation warning)
+    const { data: sourceEndpoint } = useQuery({
+        queryKey: ['endpoint', sourceEndpointId],
+        queryFn: () => getEndpoint(sourceEndpointId!),
+        enabled: !!sourceEndpointId && !isCustomEndpoint
+    })
+
+    // Check if current test/step has deviated from source endpoint
+    const hasDeviatedFromSource = useMemo(() => {
+        if (!sourceEndpoint || isCustomEndpoint) return false
+
+        const methodChanged = method !== sourceEndpoint.method
+
+        // Extract path from URL (remove baseUrl if present)
+        const currentPath = url.replace(/\{\{baseUrl\}\}/g, '')
+        const pathChanged = normalizePath(currentPath) !== normalizePath(sourceEndpoint.path)
+
+        return methodChanged || pathChanged
+    }, [method, url, sourceEndpoint, isCustomEndpoint])
 
     const [headers, setHeaders] = useState<Record<string, string>>(() => {
         // Try to load from session first
@@ -325,10 +377,14 @@ export default function RequestTester({
     const [showEnvInfo, setShowEnvInfo] = useState(false)
     const envInfoButtonRef = useRef<HTMLButtonElement>(null)
 
+    // Variable extraction editor ref
+    const variableExtractionEditorRef = useRef<VariableExtractionEditorRef>(null)
+
     // Save session state whenever relevant state changes
     useEffect(() => {
         if (onSessionChange) {
             const session: SessionState = {
+                testCaseId: testCase?.id, // Include test case ID for validation
                 activeRequestTab,
                 activeResponseTab,
                 lastResponse: response,
@@ -343,27 +399,36 @@ export default function RequestTester({
                 }
             }
             console.log('[RequestTester] Session state changed, saving:', {
+                testCaseId: testCase?.id,
                 hasResponse: !!response,
                 hasError: !!error,
                 responseTime,
-                url,
-                session
+                url
             })
             onSessionChange(session)
         }
-    }, [activeRequestTab, activeResponseTab, response, error, responseTime, url, headers, params, body, formData, onSessionChange])
+    }, [testCase?.id, activeRequestTab, activeResponseTab, response, error, responseTime, url, headers, params, body, formData, onSessionChange])
 
     // Reset state when testCase changes (switching between different tests)
     useEffect(() => {
         if (!testCase) return
 
-        // Skip reset if we have a saved session (to preserve user edits)
-        if (initialSession?.lastRequest) {
-            console.log('[RequestTester] Skipping reset - session exists')
+        // Only use session if it belongs to THIS test case
+        const isValidSession = initialSession?.testCaseId === testCase.id
+
+        if (isValidSession && initialSession?.lastRequest) {
+            console.log('[RequestTester] Restoring valid session for test', testCase.id)
             return
         }
 
-        console.log('[RequestTester] No session found, initializing from defaults')
+        if (initialSession?.testCaseId && initialSession.testCaseId !== testCase.id) {
+            console.log('[RequestTester] Ignoring session from different test', {
+                sessionTestId: initialSession.testCaseId,
+                currentTestId: testCase.id
+            })
+        }
+
+        console.log('[RequestTester] Initializing fresh state for test', testCase.id)
 
         // Reset URL with {{baseUrl}} template
         let path = endpoint.path
@@ -565,8 +630,7 @@ export default function RequestTester({
     const substituteVariables = (text: string, variables: Record<string, string>): string => {
         // First pass: substitute built-in variables ({{$variableName}}) and {{baseUrl}}
         let result = substituteBuiltInVariables(text, {
-            selectedEnv,
-            defaultBaseUrl: 'http://localhost:3000'
+            selectedEnv
         })
 
         // Second pass: substitute environment variables ({{variableName}})
@@ -586,20 +650,14 @@ export default function RequestTester({
         try {
             const startTime = Date.now()
 
-            // Combine environment variables with baseUrl
-            const envVariables = {
-                ...(selectedEnv?.variables || {}),
-                ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
-            }
-
-            // Always substitute variables (built-in + environment)
+            // Always substitute variables (built-in + environment + workflow)
             // This now includes {{baseUrl}} substitution
-            requestUrl = substituteVariables(requestUrl, envVariables)
+            requestUrl = substituteVariables(requestUrl, allVariables)
 
             if (Object.keys(params).length > 0) {
                 const substitutedParams: Record<string, string> = {}
                 Object.entries(params).forEach(([key, value]) => {
-                    substitutedParams[key] = substituteVariables(value, envVariables)
+                    substitutedParams[key] = substituteVariables(value, allVariables)
                 })
 
                 const queryString = new URLSearchParams(substitutedParams).toString()
@@ -608,14 +666,14 @@ export default function RequestTester({
 
             const substitutedHeaders: Record<string, string> = {}
             Object.entries(headers).forEach(([key, value]) => {
-                substitutedHeaders[key] = substituteVariables(value, envVariables)
+                substitutedHeaders[key] = substituteVariables(value, allVariables)
             })
 
             // Substitute variables in environment headers as well
             const substitutedEnvHeaders: Record<string, string> = {}
             if (selectedEnv?.headers) {
                 Object.entries(selectedEnv.headers).forEach(([key, value]) => {
-                    substitutedEnvHeaders[key] = substituteVariables(String(value), envVariables)
+                    substitutedEnvHeaders[key] = substituteVariables(String(value), allVariables)
                 })
             }
 
@@ -645,7 +703,7 @@ export default function RequestTester({
                     delete finalHeaders['Content-Type']
                 } else if (body) {
                     // Use JSON or other body types
-                    requestBody = substituteVariables(body, envVariables)
+                    requestBody = substituteVariables(body, allVariables)
                 }
             }
 
@@ -683,8 +741,22 @@ export default function RequestTester({
                 // Evaluate assertions (cast local assertions to database type)
                 const assertionResults = validateAssertions(assertions as any, executionResponse)
 
-                // Add assertion results to response
-                setResponse({ ...result, assertionResults })
+                // Extract variables if configured
+                let extractedVariables: Record<string, any> | undefined
+                if (extractVariables && extractVariables.length > 0) {
+                    extractedVariables = extractVariablesFromResponse(extractVariables, executionResponse)
+                    console.log('[RequestTester] Extracted variables:', extractedVariables)
+
+                    // Save extracted variables to workflow state (for manual step testing)
+                    if (extractedVariables && onWorkflowVariablesChange) {
+                        const updatedWorkflowVars = { ...workflowVariables, ...extractedVariables }
+                        onWorkflowVariablesChange(updatedWorkflowVars)
+                        console.log('[RequestTester] Saved to workflow variables:', updatedWorkflowVars)
+                    }
+                }
+
+                // Add assertion results and extracted variables to response
+                setResponse({ ...result, assertionResults, extractedVariables })
                 return
             }
 
@@ -903,20 +975,60 @@ export default function RequestTester({
                 </div>
 
                 <div className="p-4">
+                    {/* Source Deviation Warning */}
+                    {hasDeviatedFromSource && sourceEndpoint && (
+                      <div className="bg-amber-50 border-l-4 border-amber-400 p-3 mb-4 rounded">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-amber-800">
+                              Modified from source endpoint
+                            </p>
+                            <p className="text-xs text-amber-700 mt-1">
+                              Original: <code className="bg-white px-1.5 py-0.5 rounded border border-amber-200 text-amber-900 font-mono text-xs">
+                                {sourceEndpoint.method} {sourceEndpoint.path}
+                              </code>
+                            </p>
+                            <div className="mt-2 space-y-0.5">
+                              {method !== sourceEndpoint.method && (
+                                <p className="text-xs text-amber-600">
+                                  • Method: <span className="font-mono">{sourceEndpoint.method}</span> → <span className="font-mono font-semibold">{method}</span>
+                                </p>
+                              )}
+                              {normalizePath(url.replace(/\{\{baseUrl\}\}/g, '')) !== normalizePath(sourceEndpoint.path) && (
+                                <p className="text-xs text-amber-600">
+                                  • Path structure modified
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* URL and Method */}
                     <div className="mb-4">
                         <div className="flex items-center gap-2">
-              <span className={`px-4 py-2 rounded font-semibold text-sm ${getMethodColor(method)}`}>
-                {method}
-              </span>
+              <select
+                value={method}
+                onChange={(e) => {
+                  setMethod(e.target.value)
+                  onTestUpdate?.({ method: e.target.value })
+                }}
+                disabled={readOnly}
+                className={`px-4 py-2 rounded font-semibold text-sm cursor-pointer border-2 focus:outline-none focus:ring-2 focus:ring-purple-500 ${getMethodColor(method)}`}
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+              </select>
                             <div className="flex-1">
                                 <VariableInput
                                     value={url}
                                     onChange={setUrl}
-                                    variables={{
-                                        ...(selectedEnv?.variables || {}),
-                                        ...(selectedEnv?.baseUrl ? { baseUrl: selectedEnv.baseUrl } : {}),
-                                    }}
+                                    variables={allVariables}
                                     disabled={readOnly}
                                     placeholder="Enter URL"
                                 />
@@ -950,6 +1062,7 @@ export default function RequestTester({
                             setHeaders({ ...headers, 'Content-Type': contentType })
                         }}
                         selectedEnv={selectedEnv}
+                        workflowVariables={workflowVariables}
                         readOnly={readOnly}
                         initialActiveTab={activeRequestTab}
                         onActiveTabChange={setActiveRequestTab}
@@ -1073,58 +1186,44 @@ export default function RequestTester({
 
             {/* Extract Variables Section */}
             <div className="bg-white border border-gray-200 rounded-lg">
-                <div className="border-b border-gray-200 px-4 py-3">
-                    <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                        📤 Extract Variables
-                        {extractVariables.length > 0 && (
-                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
-                                {extractVariables.length}
-                            </span>
-                        )}
-                    </h3>
-                    <p className="text-sm text-gray-600 mt-1">
-                        Extract values from response to use in subsequent steps
-                    </p>
+                <div className="border-b border-gray-200 px-4 py-3 flex items-start justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                            📤 Extract Variables
+                            {extractVariables.length > 0 && (
+                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                    {extractVariables.length}
+                                </span>
+                            )}
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Extract values from response to use in subsequent steps
+                        </p>
+                    </div>
+
+                    {/* Add Button */}
+                    {!readOnly && (
+                        <button
+                            onClick={() => variableExtractionEditorRef.current?.openAddForm()}
+                            className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                            title="Add Variable Extraction"
+                        >
+                            <Plus size={20} />
+                        </button>
+                    )}
                 </div>
 
                 <div className="p-4">
                     <VariableExtractionEditor
+                        ref={variableExtractionEditorRef}
                         extractions={extractVariables}
                         onExtractionsChange={(extractions) => {
                             setExtractVariables(extractions)
                             onExtractVariablesChange?.(extractions)
                         }}
                         mode={readOnly ? 'view' : 'edit'}
+                        extractedValues={response?.extractedVariables}
                     />
-
-                    {/* Show extraction results after test execution */}
-                    {response?.extractedVariables && Object.keys(response.extractedVariables).length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                            <h4 className="text-sm font-semibold text-gray-700 mb-2">
-                                ✅ Extraction Results
-                            </h4>
-                            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                    <tr className="border-b border-green-200">
-                                        <th className="text-left py-2 px-2 font-semibold text-green-900">Variable</th>
-                                        <th className="text-left py-2 px-2 font-semibold text-green-900">Value</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    {Object.entries(response.extractedVariables).map(([key, value]) => (
-                                        <tr key={key} className="border-b border-green-100 last:border-0">
-                                            <td className="py-2 px-2 font-mono text-purple-700">{key}</td>
-                                            <td className="py-2 px-2 font-mono text-gray-800">
-                                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 

@@ -30,13 +30,13 @@ describe('Variable Substitution', () => {
       expect(result).toBe('http://api.example.com/users/{{userId}}')
     })
 
-    it('should remove unresolved variables when keepUnresolved is false', () => {
+    it('should replace unresolved variables with "undefined" when keepUnresolved is false', () => {
       const result = replaceVariables(
         '{{baseUrl}}/users/{{userId}}',
         { baseUrl: 'http://api.example.com' },
         { keepUnresolved: false }
       )
-      expect(result).toBe('http://api.example.com/users/')
+      expect(result).toBe('http://api.example.com/users/undefined')
     })
 
     it('should handle nested variables (recursive resolution)', () => {
